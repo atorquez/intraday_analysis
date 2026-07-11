@@ -11,7 +11,6 @@ from sklearn.preprocessing import StandardScaler
 from analysis.under_control_explorer import intraday_buy_zone
 from data.core_lists import CORE_ETFS, CORE_AI, CORE_SPACE
 
-
 # ---------------------------------------------------------
 # COMPANY NAME LOOKUP
 # ---------------------------------------------------------
@@ -21,7 +20,6 @@ def get_company_name(ticker):
         return info.get("shortName", ticker)
     except Exception:
         return ticker
-
 
 # ---------------------------------------------------------
 # FETCH DAILY DATA
@@ -37,6 +35,29 @@ def fetch_daily(ticker):
     df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
     return df
 
+# ---------------------------------------------------------
+# FETCH INTRADAY DATA (1-minute)
+# ---------------------------------------------------------
+def fetch_intraday(ticker):
+    try:
+        df = yf.download(
+            tickers=ticker,
+            period="1d",
+            interval="1m",
+            progress=False
+        )
+
+        if df is None or df.empty:
+            return None
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+        return df
+
+    except Exception:
+        return None
 
 # ---------------------------------------------------------
 # EXTRA INDICATORS FOR PCA
@@ -72,7 +93,6 @@ def compute_extra_indicators(df):
     df = df.dropna()
     return df
 
-
 # ---------------------------------------------------------
 # PCA COMPONENTS (WITH STANDARDSCALER)
 # ---------------------------------------------------------
@@ -101,9 +121,8 @@ def compute_pca_components(df):
     pca1, pca2, pca3 = components[-1]
     return float(pca1), float(pca2), float(pca3)
 
-
 # ---------------------------------------------------------
-# INDICATORS
+# INDICATORS (DAILY)
 # ---------------------------------------------------------
 def calculate_indicators(df):
     df = df.copy()
@@ -134,17 +153,69 @@ def calculate_indicators(df):
     else:
         trend = "FLAT"
 
+    ema9 = last["EMA9"]
+    ema20 = last["EMA20"]
+    ema9_slope = df["EMA9"].iloc[-1] - df["EMA9"].iloc[-5]
+    ema20_slope = df["EMA20"].iloc[-1] - df["EMA20"].iloc[-5]
+
+    try:
+        pca1 = df["PCA1"].iloc[-1]
+    except Exception:
+        pca1 = None
+
+    if ema9 > ema20 and ema9_slope > 0 and ema20_slope > 0 and trend == "UP" and (pca1 is None or pca1 > 0):
+        daily_execution = "Ready"
+    elif ema9 > ema20 and (ema9_slope < 0 or ema20_slope < 0):
+        daily_execution = "False Ready"
+    elif abs((ema9 - ema20) / ema20) < 0.003:
+        daily_execution = "Crossing Soon"
+    else:
+        daily_execution = "Setup Only"
+
     return {
         "Close": round(last["Close"], 2),
         "ATR%": round(last["ATR%"], 2),
         "RVOL": round(last["RVOL"], 2),
         "Gap%": round(last["Gap%"], 2),
-        "EMA9": last["EMA9"],
-        "EMA20": last["EMA20"],
+        "EMA9": ema9,
+        "EMA20": ema20,
         "EMA50": last["EMA50"],
-        "Trend": trend
+        "Trend": trend,
+        "Execution_Status": daily_execution
     }
 
+# ---------------------------------------------------------
+# INTRADAY EXECUTION ENGINE
+# ---------------------------------------------------------
+def calculate_intraday_execution(df_intraday):
+    """
+    df_intraday must be 1‑minute or 5‑minute data with columns:
+    ['Open','High','Low','Close','Volume']
+    """
+    df = df_intraday.copy()
+
+    df["EMA9"] = df["Close"].ewm(span=9).mean()
+    df["EMA20"] = df["Close"].ewm(span=20).mean()
+
+    ema9_slope = df["EMA9"].iloc[-1] - df["EMA9"].iloc[-3]
+    ema20_slope = df["EMA20"].iloc[-1] - df["EMA20"].iloc[-3]
+
+    df["ROC"] = df["Close"].pct_change() * 100
+    intraday_momentum = df["ROC"].iloc[-1]
+
+    if df["EMA9"].iloc[-1] > df["EMA20"].iloc[-1]:
+        intraday_trend = "UP"
+    else:
+        intraday_trend = "DOWN"
+
+    return {
+        "intraday_ema9": df["EMA9"].iloc[-1],
+        "intraday_ema20": df["EMA20"].iloc[-1],
+        "intraday_ema9_slope": ema9_slope,
+        "intraday_ema20_slope": ema20_slope,
+        "intraday_momentum": intraday_momentum,
+        "intraday_trend": intraday_trend
+    }
 
 # ---------------------------------------------------------
 # SCORING ENGINE
@@ -169,7 +240,6 @@ def score_stock(ind):
     score += 5
     return score
 
-
 # ---------------------------------------------------------
 # VMAS
 # ---------------------------------------------------------
@@ -179,7 +249,6 @@ def compute_vmas(price, buyzone10, pca1):
 
     dist = (price - buyzone10) / buyzone10
     return (1 - dist) * pca1
-
 
 # ---------------------------------------------------------
 # BUYZONE HEATMAP
@@ -201,7 +270,6 @@ def buyzone_heatmap(price, bz10, bz5, dist10):
         return "Extended"
 
     return "Normal"
-
 
 # ---------------------------------------------------------
 # BUY SIGNAL ENGINE
@@ -226,7 +294,6 @@ def compute_buy_signal(price, buyzone10, buyzone5, dist10, pca1, trend):
         return "Neutral"
 
     return "Avoid"
-
 
 # ---------------------------------------------------------
 # RANK UNIVERSE
@@ -256,34 +323,79 @@ def rank_universe(symbols):
                 "PCA3": None,
                 "VMAS": None,
                 "BuyZone_Heatmap": "Unknown",
-                "Buy_Signal": "Avoid"
+                "Buy_Signal": "Avoid",
+                "Execution_Status": "UNKNOWN"
             })
             continue
 
+        # DAILY INDICATORS
         ind = calculate_indicators(df)
         score = score_stock(ind)
 
+        # BUYZONE
         buyzone10 = intraday_buy_zone(df, lookback=10, percentile=0.15)
         buyzone5 = intraday_buy_zone(df, lookback=5, percentile=0.15)
 
         distance10 = ((ind["Close"] - buyzone10) / buyzone10 * 100) if buyzone10 else None
         distance5 = ((ind["Close"] - buyzone5) / buyzone5 * 100) if buyzone5 else None
 
+        # PCA
         pca1, pca2, pca3 = compute_pca_components(df)
 
+        # VMAS
         vmas = compute_vmas(ind["Close"], buyzone10, pca1)
 
+        # HEATMAP
         heatmap = buyzone_heatmap(ind["Close"], buyzone10, buyzone5, distance10)
 
+        # BUY SIGNAL
         buy_signal = compute_buy_signal(
-            ind["Close"],
-            buyzone10,
-            buyzone5,
-            distance10,
-            pca1,
-            ind["Trend"]
+            ind["Close"], buyzone10, buyzone5, distance10, pca1, ind["Trend"]
         )
 
+        # INTRADAY EXECUTION FILTER
+        intraday_df = fetch_intraday(ticker)
+
+        if intraday_df is not None and len(intraday_df) > 10:
+            intraday = calculate_intraday_execution(intraday_df)
+
+            i_ema9 = intraday["intraday_ema9"]
+            i_ema20 = intraday["intraday_ema20"]
+            i_slope9 = intraday["intraday_ema9_slope"]
+            i_slope20 = intraday["intraday_ema20_slope"]
+            i_momentum = intraday["intraday_momentum"]
+            i_trend = intraday["intraday_trend"]
+
+            daily_exec = ind["Execution_Status"]
+
+            if (
+                daily_exec == "Ready"
+                and i_ema9 > i_ema20
+                and i_slope9 > 0
+                and i_slope20 > 0
+                and i_momentum > 0
+                and i_trend == "UP"
+            ):
+                execution_status = "Ready"
+
+            elif (
+                daily_exec == "Ready"
+                and (i_slope9 < 0 or i_slope20 < 0 or i_trend == "DOWN")
+            ):
+                execution_status = "Intraday False Ready"
+
+            elif (
+                daily_exec == "Crossing Soon"
+                and abs((i_ema9 - i_ema20) / i_ema20) < 0.003
+            ):
+                execution_status = "Crossing Soon"
+
+            else:
+                execution_status = daily_exec
+        else:
+            execution_status = ind["Execution_Status"]
+
+        # APPEND RESULT
         results.append({
             "Ticker": ticker,
             "Name": get_company_name(ticker),
@@ -302,7 +414,8 @@ def rank_universe(symbols):
             "PCA3": pca3,
             "VMAS": vmas,
             "BuyZone_Heatmap": heatmap,
-            "Buy_Signal": buy_signal
+            "Buy_Signal": buy_signal,
+            "Execution_Status": execution_status
         })
 
     ranking = (
@@ -312,6 +425,9 @@ def rank_universe(symbols):
     )
 
     return ranking
+
+
+
 
 
 
