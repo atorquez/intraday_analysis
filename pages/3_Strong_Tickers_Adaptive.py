@@ -227,10 +227,7 @@ with st.sidebar:
     )
     st.session_state["regime_max_tickers"] = int(max_tickers_setting)
 
-    show_balloons = st.checkbox("Show celebration animation", value=False, key="show_balloons")
-    st.session_state["show_balloons"] = show_balloons
-
-
+ 
 # ---------------------------------------------------------
 # SUMMARY AND DEFINITIONS (PAGE 3 — REGIME ADAPTIVE)
 # ---------------------------------------------------------
