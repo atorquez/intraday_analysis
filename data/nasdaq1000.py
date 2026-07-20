@@ -1,6 +1,3 @@
-# NASDAQ-1000 Universe (Common Stocks Only)
-# Auto-generated from nasdaq_full_list.csv
-
 nasdaq1000 = [
     "NVDA",
     "AAPL",

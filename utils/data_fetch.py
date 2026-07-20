@@ -53,16 +53,14 @@ def get_last_10_closes(symbol: str):
 # LOAD UNIVERSE (SP500 + NASDAQ100 + OTHER)
 # ---------------------------------------------------------
 from data.sp500_list import sp500
-from data.nasdaq500_list import nasdaq500
-from data.other_list import OTHER
+from data.nasdaq1000 import nasdaq1000
 
 def load_universe():
     """
     Returns the combined trading universe for the Intraday Ranker.
     Includes:
     - SP500
-    - NASDAQ100
-    - Custom exploration tickers (OTHER)
+    - NASDAQ1000   
     """
-    return sorted(list(set(sp500 + nasdaq500 + OTHER)))
+    return sorted(list(set(sp500 + nasdaq1000)))
 
