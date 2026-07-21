@@ -1,6 +1,6 @@
 # ==============================================================================
 # PAGE 1 — INTRADAY ANALYSIS (FULL PERSISTENT VERSION)
-# FIXED VERSION — Addresses all identified issues
+# PATCHED VERSION — Structural universe passed to Page 2
 # ==============================================================================
 
 import streamlit as st
@@ -44,7 +44,8 @@ def color_execution_column(df):
 # ---------------------------------------------------------
 # RESTORE PREVIOUS FILTERED RESULTS IF AVAILABLE
 # ---------------------------------------------------------
-filtered_results = st.session_state.get("intraday_filtered_results", None)
+filtered_results = st.session_state.get("intraday_visual_results", None)
+structural_results = st.session_state.get("intraday_filtered_results", None)
 
 # ---------------------------------------------------------
 # PRICE FILTERS (BEFORE RUN)
@@ -78,7 +79,6 @@ execution_filter = st.multiselect(
 run_model = st.button("Run Intraday Model", key="intraday_run_button")
 
 if run_model:
-    # FIXED: Added progress bar for large universes
     progress_bar = st.progress(0, text="Loading universe...")
 
     try:
@@ -89,15 +89,19 @@ if run_model:
 
         progress_bar.progress(0.1, text=f"Scanning {len(base_universe)} tickers...")
 
-        # FIXED: Use cached version with tuple for hashability
         ranking = cached_rank_universe(tuple(base_universe))
 
-        progress_bar.progress(0.9, text="Applying filters...")
+        progress_bar.progress(0.6, text="Applying filters...")
 
         if ranking is None or ranking.empty:
             st.warning("No stock configurations satisfied the technical requirements.")
         else:
-            # Apply filters
+            # Structural universe summary (before visual filters)
+            st.markdown(
+                f"**Structural Universe (Daily):** {len(ranking)} tickers"
+            )
+
+            # Apply visual filters for display only
             filtered = ranking.copy()
 
             filtered = filtered[
@@ -115,8 +119,19 @@ if run_model:
                     filtered["Execution"].isin(execution_filter)
                 ]
 
-            # Store filtered results
-            st.session_state["intraday_filtered_results"] = filtered
+            # Store structural universe for Page 2
+            st.session_state["intraday_filtered_results"] = ranking
+
+            # Store visual subset for Page 1 display
+            st.session_state["intraday_visual_results"] = filtered
+
+            # Visual universe summary
+            st.markdown(
+                f"**User Visual Filters Applied:** {len(filtered)} tickers shown"
+            )
+            st.markdown(
+                f"**Tickers Passed to Page 2 (Structural):** {len(ranking)} tickers"
+            )
 
             if filtered.empty:
                 st.info("No companies matched the selected filters.")
@@ -134,12 +149,23 @@ if run_model:
     except Exception as e:
         progress_bar.empty()
         st.error(f"Model execution failed: {str(e)}")
-        st.exception(e)  # Show full traceback in dev mode
+        st.exception(e)
 
 # ---------------------------------------------------------
 # RENDER STORED FILTERED RESULTS WHEN USER RETURNS TO PAGE
 # ---------------------------------------------------------
 elif filtered_results is not None:
+    if structural_results is not None:
+        st.markdown(
+            f"**Structural Universe (Daily):** {len(structural_results)} tickers"
+        )
+        st.markdown(
+            f"**User Visual Filters Applied (Stored):** {len(filtered_results)} tickers shown"
+        )
+        st.markdown(
+            f"**Tickers Passed to Page 2 (Structural):** {len(structural_results)} tickers"
+        )
+
     st.subheader(f"🚀 Primary Universe — {len(filtered_results)} Stored Results")
 
     st.dataframe(
@@ -147,6 +173,10 @@ elif filtered_results is not None:
         hide_index=True,
         use_container_width=True
     )
+
+# ---------------------------------------------------------
+# SUMMARY AND DEFINITIONS (PATCHED & SYNCHRONIZED VERSION)
+# ---------------------------------------------------------
 
 # ---------------------------------------------------------
 # SUMMARY AND DEFINITIONS (PATCHED & SYNCHRONIZED VERSION)

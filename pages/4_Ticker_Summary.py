@@ -1,76 +1,12 @@
 import streamlit as st
 import yfinance as yf
 
-# ---------------------------------------------------------
-# PRO-GRADE UTILITY: LARGE FINANCIAL NUMBER FORMATTER
-# ---------------------------------------------------------
-def format_financial_value(val, is_percentage=False):
-    if val is None:
-        return "N/A"
-    try:
-        num = float(val)
-        if is_percentage:
-            if num < 1:
-                return f"{round(num * 100, 2)}%"
-            else:
-                return f"{round(num, 2)}%"
-        if num >= 1e12:
-            return f"${round(num / 1e12, 2)} Trillion"
-        elif num >= 1e9:
-            return f"${round(num / 1e9, 2)} Billion"
-        elif num >= 1e6:
-            return f"${round(num / 1e6, 2)} Million"
-        return f"${round(num, 2)}"
-    except:
-        return "N/A"
-
-# ---------------------------------------------------------
-# FUNDAMENTAL DATA FETCH ENGINE (YFINANCE.INFO)
-# ---------------------------------------------------------
-def get_executive_summary(ticker):
-    try:
-        t = yf.Ticker(str(ticker).strip().upper())
-        info = t.info
-    except Exception as e:
-        return None, f"Network Extraction Failure: {str(e)}"
-
-    if not info or len(info) < 5:
-        return None, "⚠️ Fundamentals not available for this ticker. This is normal for small-cap or low-coverage companies."
-
-    summary = {
-        "Company": info.get("longName", info.get("shortName", ticker)),
-        "Sector": info.get("sector", "N/A"),
-        "Industry": info.get("industry", "N/A"),
-        "Country": info.get("country", "N/A"),
-        "Employees": info.get("fullTimeEmployees", "N/A"),
-
-        "Market Cap": format_financial_value(info.get("marketCap")),
-        "Beta": round(info.get("beta", 0.0), 2) if info.get("beta") is not None else "N/A",
-
-        "Forward PE": round(info.get("forwardPE", 0.0), 2) if info.get("forwardPE") is not None else "N/A",
-        "Trailing PE": round(info.get("trailingPE", 0.0), 2) if info.get("trailingPE") is not None else "N/A",
-
-        "Profit Margin": format_financial_value(info.get("profitMargins"), is_percentage=True),
-        "Revenue Growth": format_financial_value(info.get("revenueGrowth"), is_percentage=True),
-        "Earnings Growth": format_financial_value(info.get("earningsGrowth"), is_percentage=True),
-
-        "Dividend Yield": format_financial_value(info.get("dividendYield"), is_percentage=True),
-        "Debt-to-Equity": round(info.get("debtToEquity", 0.0), 2) if info.get("debtToEquity") is not None else "N/A",
-
-        "52 Week High": round(info.get("fiftyTwoWeekHigh", 0.0), 2) if info.get("fiftyTwoWeekHigh") is not None else "N/A",
-        "52 Week Low": round(info.get("fiftyTwoWeekLow", 0.0), 2) if info.get("fiftyTwoWeekLow") is not None else "N/A",
-        "Shares Outstanding": format_financial_value(info.get("sharesOutstanding")).replace("$", "")
-    }
-
-    executive_text = (
-        f"**{summary['Company']}** operates in the **{summary['Sector']}** sector, "
-        f"specializing in the **{summary['Industry'].lower()}** segment. "
-        f"The firm maintains a market capitalization of **{summary['Market Cap']}** and "
-        f"shows a Beta of **{summary['Beta']}**, defining its volatility baseline "
-        f"relative to the broad market."
-    )
-
-    return summary, executive_text
+# Import shared scoring module
+from utils.fundamental_scoring import (
+    get_fundamental_scores,
+    get_fundamental_scores_cached,
+    format_financial_value
+)
 
 # ---------------------------------------------------------
 # STREAMLIT PAGE 4 — FUNDAMENTALS PANEL
@@ -79,21 +15,71 @@ st.set_page_config(layout="wide")
 st.title("📘 Corporate Fundamentals & Executive Summary")
 st.caption("SPC Version: 2026-08-08 — Fundamentals Module")
 
-ticker = st.text_input("Enter a ticker symbol:", value="MSFT").strip().upper()
+# Check if navigated from Page 2 with a ticker
+research_ticker = st.session_state.pop("research_ticker", None)
+
+default_ticker = research_ticker if research_ticker else "MSFT"
+
+ticker = st.text_input(
+    "Enter a ticker symbol:", 
+    value=default_ticker, 
+    key="ticker_input_main"
+).strip().upper()
 
 if ticker:
     with st.spinner(f"Querying fundamentals for {ticker}..."):
-        summary, narrative = get_executive_summary(ticker)
+        # Use the SAME scoring function as Page 2
+        scores = get_fundamental_scores_cached(ticker)
 
-    if summary is None:
-        st.error(narrative)
+        # Also fetch full info for display
+        try:
+            info = yf.Ticker(ticker).info
+        except Exception as e:
+            info = None
+
+    if scores is None or info is None:
+        st.error(f"⚠️ Fundamentals not available for {ticker}. This is normal for small-cap or low-coverage companies.")
 
     else:
+        # Build summary dict for display (same structure as before)
+        summary = {
+            "Company": info.get("longName", info.get("shortName", ticker)),
+            "Sector": scores.get("Sector", "N/A"),
+            "Industry": scores.get("Industry", "N/A"),
+            "Country": info.get("country", "N/A"),
+            "Employees": info.get("fullTimeEmployees", "N/A"),
+            "Market Cap": format_financial_value(scores.get("Market_Cap")),
+            "Beta": round(scores.get("_raw_beta", 0.0), 2) if scores.get("_raw_beta") is not None else "N/A",
+            "Forward PE": round(scores.get("_raw_forward_pe", 0.0), 2) if scores.get("_raw_forward_pe") is not None else "N/A",
+            "Trailing PE": round(scores.get("_raw_trailing_pe", 0.0), 2) if scores.get("_raw_trailing_pe") is not None else "N/A",
+            "Profit Margin": format_financial_value(scores.get("_raw_profit_margin"), is_percentage=True),
+            "Revenue Growth": format_financial_value(scores.get("_raw_rev_growth"), is_percentage=True),
+            "Earnings Growth": format_financial_value(scores.get("_raw_earn_growth"), is_percentage=True),
+            "Dividend Yield": format_financial_value(info.get("dividendYield"), is_percentage=True),
+            "Debt-to-Equity": round(scores.get("_raw_dte", 0.0), 2) if scores.get("_raw_dte") is not None else "N/A",
+            "Shares Outstanding": format_financial_value(info.get("sharesOutstanding")).replace("$", ""),
+        }
+
+        # Use scores from shared module (GUARANTEED same as Page 2)
+        valuation_score = scores["Fund_Valuation"]
+        growth_score = scores["Fund_Growth"]
+        profit_score = scores["Fund_Profit"]
+        risk_score = scores["Fund_Risk"]
+        overall_score = scores["Fund_Score"]
+
         # ---------------------------------------------------------
         # EXECUTIVE SUMMARY
         # ---------------------------------------------------------
         st.markdown("### 🧠 Executive Summary")
-        st.info(narrative)
+
+        executive_text = (
+            f"**{summary['Company']}** operates in the **{summary['Sector']}** sector, "
+            f"specializing in the **{summary['Industry'].lower()}** segment. "
+            f"The firm maintains a market capitalization of **{summary['Market Cap']}** and "
+            f"shows a Beta of **{summary['Beta']}**, defining its volatility baseline "
+            f"relative to the broad market."
+        )
+        st.info(executive_text)
 
         col1, col2 = st.columns(2)
 
@@ -120,95 +106,19 @@ if ticker:
         # ---------------------------------------------------------
         # FUNDAMENTAL SCORING SYSTEM (0–100)
         # ---------------------------------------------------------
-
-        def score_valuation(forward_pe, trailing_pe):
-            try:
-                pe = forward_pe if forward_pe != "N/A" else trailing_pe
-                if pe == "N/A":
-                    return 50
-                if pe < 10:
-                    return 90
-                elif pe < 20:
-                    return 80
-                elif pe < 30:
-                    return 65
-                elif pe < 40:
-                    return 50
-                else:
-                    return 35
-            except:
-                return 50
-
-        def score_growth(rev_growth, earn_growth):
-            try:
-                rg = float(rev_growth.replace("%","")) if rev_growth != "N/A" else 0
-                eg = float(earn_growth.replace("%","")) if earn_growth != "N/A" else 0
-                g = (rg + eg) / 2
-                if g > 30:
-                    return 95
-                elif g > 20:
-                    return 85
-                elif g > 10:
-                    return 70
-                elif g > 5:
-                    return 55
-                else:
-                    return 40
-            except:
-                return 50
-
-        def score_profitability(margin):
-            try:
-                m = float(margin.replace("%",""))
-                if m > 20:
-                    return 95
-                elif m > 10:
-                    return 85
-                elif m > 0:
-                    return 70
-                else:
-                    return 40
-            except:
-                return 50
-
-        def score_risk(beta, dte):
-            try:
-                b = float(beta)
-                d = float(dte)
-
-                beta_score = 90 if b < 0.8 else 75 if b < 1.0 else 60 if b < 1.2 else 45
-
-                if d < 50:
-                    dte_score = 90
-                elif d < 100:
-                    dte_score = 75
-                elif d < 150:
-                    dte_score = 60
-                elif d < 200:
-                    dte_score = 45
-                else:
-                    dte_score = 30
-
-                return int((beta_score + dte_score) / 2)
-            except:
-                return 50
-
-        valuation_score = score_valuation(summary["Forward PE"], summary["Trailing PE"])
-        growth_score = score_growth(summary["Revenue Growth"], summary["Earnings Growth"])
-        profit_score = score_profitability(summary["Profit Margin"])
-        risk_score = score_risk(summary["Beta"], summary["Debt-to-Equity"])
-
-        overall_score = int(
-            valuation_score * 0.25 +
-            growth_score * 0.30 +
-            profit_score * 0.20 +
-            risk_score * 0.25
-        )
-
         st.markdown("### 📊 Fundamental Scores (0–100)")
+
+        # Color code the overall score
+        if overall_score >= 80:
+            score_color = "🟢"
+        elif overall_score >= 60:
+            score_color = "🟡"
+        else:
+            score_color = "🔴"
+
         st.success(
             f"""
-**Overall Fundamental Score:** {overall_score}
+**{score_color} Overall Fundamental Score:** {overall_score}
 
 **Valuation Score:** {valuation_score}  
 **Growth Score:** {growth_score}  
@@ -216,6 +126,25 @@ if ticker:
 **Risk Score:** {risk_score}
 """
         )
+
+        # Debug expander to show raw values (helps verify consistency)
+        with st.expander("🔧 Debug: Raw Values & Calculation"):
+            st.write("**Raw values from yfinance:**")
+            st.json({
+                "forwardPE": scores.get("_raw_forward_pe"),
+                "trailingPE": scores.get("_raw_trailing_pe"),
+                "revenueGrowth": scores.get("_raw_rev_growth"),
+                "earningsGrowth": scores.get("_raw_earn_growth"),
+                "profitMargins": scores.get("_raw_profit_margin"),
+                "beta": scores.get("_raw_beta"),
+                "debtToEquity": scores.get("_raw_dte"),
+            })
+            st.write("**Score calculation:**")
+            st.write(f"Valuation: {valuation_score} × 0.25 = {valuation_score * 0.25}")
+            st.write(f"Growth: {growth_score} × 0.30 = {growth_score * 0.30}")
+            st.write(f"Profit: {profit_score} × 0.20 = {profit_score * 0.20}")
+            st.write(f"Risk: {risk_score} × 0.25 = {risk_score * 0.25}")
+            st.write(f"**Total:** {valuation_score * 0.25 + growth_score * 0.30 + profit_score * 0.20 + risk_score * 0.25}")
 
         # ---------------------------------------------------------
         # INTERPRETATION GUIDE
