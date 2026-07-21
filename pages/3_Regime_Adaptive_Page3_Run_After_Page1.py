@@ -1,6 +1,5 @@
 # ==============================================================================
 # MASTER REGIME-ADAPTIVE INTRADAY SCANNER (PAGE 3 — FULLY PATCHED)
-# FIXED VERSION — Addresses all critical bugs and performance issues
 # ==============================================================================
 
 import streamlit as st
@@ -9,14 +8,13 @@ import pandas as pd
 import datetime
 import pytz
 
-# Clean cross-imports from your local analysis and utilities modules
 from analysis.intraday_ranker import rank_universe, fetch_intraday
 from analysis.intraday_ranker_regime import (
     automatic_market_regime_detector,
     part1_bullish_scanner,
     part1_bearish_scanner,
     process_regime_intraday_trigger,
-    process_bulk_regime_triggers  # FIX: Import at top, not inside button handler
+    process_bulk_regime_triggers
 )
 from utils.data_fetch import load_universe
 
@@ -25,54 +23,41 @@ st.caption("SPC Version: 2026-08-08 (Regime Adaptive Patched)")
 st.title("🔄 Regime-Adaptive Intraday Model")
 
 # ---------------------------------------------------------
-# CACHED WRAPPERS (FIXED: Prevents re-downloading on every click)
+# CACHED WRAPPERS
 # ---------------------------------------------------------
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_rank_universe(tickers_tuple, buy_zone_percentile=0.15):
-    """Cached wrapper for rank_universe."""
     return rank_universe(list(tickers_tuple), buy_zone_percentile)
 
 @st.cache_data(ttl=120, show_spinner=False)
 def cached_spy_data(period, interval):
-    """Cached wrapper for SPY downloads."""
     return yf.download("SPY", period=period, interval=interval, progress=False)
 
 @st.cache_data(ttl=120, show_spinner=False)
 def cached_bulk_regime_triggers(watchlist_tuple, mode):
-    """Cached wrapper for bulk regime trigger evaluation."""
-    # Need fresh SPY 1m data for the trigger function
     spy_1min = yf.download("SPY", period="1d", interval="1m", progress=False)
     return process_bulk_regime_triggers(list(watchlist_tuple), spy_1min, mode=mode)
 
-
 # ---------------------------------------------------------
-# HELPER: Get market timestamp (EST)
+# HELPER: Market Timestamp
 # ---------------------------------------------------------
 def get_market_timestamp():
-    """Returns current time in US/Eastern (market time)."""
     return datetime.datetime.now(pytz.timezone("US/Eastern")).strftime("%H:%M:%S %Z")
 
-
 # ---------------------------------------------------------
-# STEP 1: AUTOMATIC MARKET CONTEXT ASSESSMENT
+# STEP 1 — MARKET REGIME
 # ---------------------------------------------------------
 st.subheader("🌐 Global Market Context")
 
-# FIX: Only compute regime when button is clicked, or use cached data
-# Market regime doesn't change drastically minute-to-minute
 regime_col1, regime_col2 = st.columns([3, 1])
-
 with regime_col2:
     refresh_regime = st.button("🔄 Refresh Regime", key="refresh_regime_btn")
 
-# Use cached regime unless user explicitly refreshes
 if refresh_regime or "market_regime" not in st.session_state:
     with st.spinner("Checking market regime status using SPY index matrix..."):
         try:
-            # FIX: Use cached SPY downloads
             spy_daily = cached_spy_data("5d", "1d")
             spy_5min = cached_spy_data("1d", "5m")
-
             market_regime = automatic_market_regime_detector(spy_daily, spy_5min)
             st.session_state["market_regime"] = market_regime
         except Exception as e:
@@ -81,7 +66,6 @@ if refresh_regime or "market_regime" not in st.session_state:
 else:
     market_regime = st.session_state["market_regime"]
 
-# Visual layout card displaying current operational rules
 if market_regime == "BULLISH_MARKET":
     st.success(f"🟢 **Current Market Regime: {market_regime}** — System is hunting for standard long momentum breakouts.")
 elif market_regime == "BEARISH_MARKET":
@@ -89,9 +73,42 @@ elif market_regime == "BEARISH_MARKET":
 else:
     st.warning(f"🟡 **Current Market Regime: {market_regime}** — High-risk choppy environment. Narrow targets are enforced.")
 
+# ---------------------------------------------------------
+# STEP 2 — ALWAYS-SHOW VALIDATION BANNER (NEW)
+# ---------------------------------------------------------
+base_tickers = load_universe()
+page1_results = st.session_state.get("intraday_filtered_results", None)
+
+st.markdown("### 🔎 Universe Validation Summary")
+
+if page1_results is not None and not page1_results.empty:
+    structural_count = len(page1_results)
+    scan_limit = st.session_state.get("regime_max_tickers", 100)
+
+    st.markdown(
+        f"""
+**Structural Universe from Page 1:** {structural_count} tickers  
+**Regime Scan Limit:** {scan_limit}  
+**Tickers Routed to Regime Engine:** {min(structural_count, scan_limit)}  
+"""
+    )
+    source_tickers = page1_results["Ticker"].tolist()
+else:
+    structural_count = len(base_tickers)
+    scan_limit = st.session_state.get("regime_max_tickers", 100)
+
+    st.warning("Page 1 structural universe not found — using fallback raw universe.")
+
+    st.markdown(
+        f"""
+**Fallback Universe Size:** {structural_count} tickers  
+**Regime Scan Limit:** {scan_limit}  
+"""
+    )
+    source_tickers = base_tickers
 
 # ---------------------------------------------------------
-# STEP 2: MASTER ENGINE ORCHESTRATION PIPELINE
+# STEP 3 — RUN BUTTON
 # ---------------------------------------------------------
 run_adaptive_model = st.button("Run Regime-Adaptive Scan", key="regime_run_button")
 
@@ -99,30 +116,11 @@ if run_adaptive_model:
     progress_bar = st.progress(0, text="Initializing scan...")
 
     try:
-        # 1. Fetch raw underlying watchlist arrays
-        base_tickers = load_universe()
-        if not base_tickers:
-            st.error("The source universe database returned empty.")
-            st.stop()
-
-        # FIX: Use Page 1 filtered results if available, otherwise full universe
-        page1_results = st.session_state.get("intraday_filtered_results", None)
-        if page1_results is not None and not page1_results.empty:
-            # Use Page 1's filtered tickers (the intended two-layer design)
-            source_tickers = page1_results["Ticker"].tolist()
-            st.info(f"Using {len(source_tickers)} tickers from Page 1 filtered results.")
-        else:
-            # Fallback to raw universe
-            source_tickers = base_tickers
-            st.warning("Page 1 results not found. Using raw universe (slower, less filtered).")
-
-        # FIX: Configurable limit instead of hardcoded 40
         max_tickers = st.session_state.get("regime_max_tickers", 100)
         test_tickers = source_tickers[:max_tickers]
 
         progress_bar.progress(0.15, text=f"Running technical analysis on {len(test_tickers)} stocks...")
 
-        # FIX: Use cached rank_universe with tuple for hashability
         calculated_universe = cached_rank_universe(tuple(test_tickers))
 
         progress_bar.progress(0.5, text="Applying regime filters...")
@@ -131,7 +129,9 @@ if run_adaptive_model:
             st.warning("The calculated stock technical matrix returned empty. Adjust timeframes or test during market hours.")
             st.stop()
 
-        # 3. Dynamic Routing Loop based on Automatically Detected Regime Status
+        # ---------------------------------------------------------
+        # REGIME ROUTING
+        # ---------------------------------------------------------
         watchlist = []
         execution_mode = "LONG"
 
@@ -145,12 +145,12 @@ if run_adaptive_model:
             execution_mode = "LONG"
             st.info(f"Targeting {len(watchlist)} Relative Strength defensive leaders outperforming the index flush.")
 
-        else:  # Choppy or sideways trend
+        else:
             watchlist = part1_bullish_scanner(calculated_universe)
             execution_mode = "LONG"
 
         # ---------------------------------------------------------
-        # STEP 3: MINUTE-BY-MINUTE INTRADAY PCA TRIGGER ENGINE
+        # STEP 4 — INTRADAY PCA TRIGGERS
         # ---------------------------------------------------------
         if not watchlist:
             st.info("No underlying assets passed the Part 1 regime selection filters.")
@@ -161,12 +161,10 @@ if run_adaptive_model:
 
             progress_bar.progress(0.6, text=f"Downloading 1-minute data for {len(watchlist)} tickers...")
 
-            # FIX: Use cached bulk trigger evaluation
             triggered_list = cached_bulk_regime_triggers(tuple(watchlist), execution_mode)
 
             progress_bar.progress(0.9, text="Compiling results...")
 
-            # Compile rows for stocks that returned a verified trigger
             for ticker in triggered_list:
                 try:
                     meta = calculated_universe[calculated_universe["Ticker"] == ticker].iloc[0]
@@ -178,20 +176,15 @@ if run_adaptive_model:
                         "RVOL": meta["RVOL"],
                         "Gap%": meta["Gap%"],
                         "Zone Status": meta["BuyZone_Heatmap"],
-                        "Signal Timestamp": get_market_timestamp()  # FIX: Market time (EST)
+                        "Signal Timestamp": get_market_timestamp()
                     })
                 except Exception:
                     continue
 
-            # Render outputs inside the Streamlit panel
             if active_signals:
-                st.success(f"🔥 Found {len(active_signals)} verified entry opportunities! Confirm on your E*TRADE charts immediately.")
-
+                st.success(f"🔥 Found {len(active_signals)} verified entry opportunities!")
                 df_signals = pd.DataFrame(active_signals)
-
-                # FIX: Store results in session state for persistence
                 st.session_state["regime_active_signals"] = df_signals
-
                 st.dataframe(df_signals, hide_index=True, use_container_width=True)
             else:
                 st.info("Watchlist is active, but no stocks have confirmed a 1-minute EMA 9/20 crossover or positive PCA acceleration right now.")
@@ -204,7 +197,7 @@ if run_adaptive_model:
         st.exception(e)
 
 # ---------------------------------------------------------
-# RENDER STORED RESULTS WHEN USER RETURNS TO PAGE
+# STORED SIGNALS
 # ---------------------------------------------------------
 elif st.session_state.get("regime_active_signals") is not None:
     stored_signals = st.session_state["regime_active_signals"]
@@ -212,22 +205,19 @@ elif st.session_state.get("regime_active_signals") is not None:
     st.dataframe(stored_signals, hide_index=True, use_container_width=True)
     st.caption(f"Last updated: {get_market_timestamp()}")
 
-
 # ---------------------------------------------------------
-# SETTINGS SIDEBAR (NEW)
+# SIDEBAR SETTINGS
 # ---------------------------------------------------------
 with st.sidebar:
     st.markdown("### ⚙️ Page 3 Settings")
     max_tickers_setting = st.number_input(
         "Max Tickers to Process",
         min_value=10,
-        max_value=500,
-        value=st.session_state.get("regime_max_tickers", 100),
-        key="regime_max_tickers_input"
+        max_value=1500,
+        value=st.session_state.get("regime_max_tickers", 1500),
+        key="regime_max_tickers"
     )
-    st.session_state["regime_max_tickers"] = int(max_tickers_setting)
-
- 
+    
 # ---------------------------------------------------------
 # SUMMARY AND DEFINITIONS (PAGE 3 — REGIME ADAPTIVE)
 # ---------------------------------------------------------
