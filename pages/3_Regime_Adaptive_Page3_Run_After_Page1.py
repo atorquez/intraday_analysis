@@ -8,14 +8,15 @@ import pandas as pd
 import datetime
 import pytz
 
-from analysis.intraday_ranker import rank_universe, fetch_intraday
-from analysis.intraday_ranker_regime import (
+from analysis.intraday_ranker_v3 import rank_universe, fetch_intraday
+from analysis.intraday_ranker_regime_v3 import (
     automatic_market_regime_detector,
     part1_bullish_scanner,
     part1_bearish_scanner,
     process_regime_intraday_trigger,
     process_bulk_regime_triggers
 )
+
 from utils.data_fetch import load_universe
 
 st.set_page_config(layout="wide")
@@ -116,7 +117,7 @@ if run_adaptive_model:
     progress_bar = st.progress(0, text="Initializing scan...")
 
     try:
-        max_tickers = st.session_state.get("regime_max_tickers", 100)
+        max_tickers = st.session_state.get("regime_max_tickers", 1500)
         test_tickers = source_tickers[:max_tickers]
 
         progress_bar.progress(0.15, text=f"Running technical analysis on {len(test_tickers)} stocks...")
