@@ -49,8 +49,9 @@ def get_last_10_closes(symbol: str):
 
     return df
 
+
 # ---------------------------------------------------------
-# LOAD UNIVERSE (SP500 + NASDAQ100 + OTHER)
+# LOAD UNIVERSE (SP500 + NASDAQ1000)
 # ---------------------------------------------------------
 from data.sp500_list import sp500
 from data.nasdaq1000 import nasdaq1000
@@ -60,7 +61,24 @@ def load_universe():
     Returns the combined trading universe for the Intraday Ranker.
     Includes:
     - SP500
-    - NASDAQ1000   
+    - NASDAQ1000
     """
     return sorted(list(set(sp500 + nasdaq1000)))
+
+
+# ---------------------------------------------------------
+# UNIVERSE SOURCE HELPER (NEW)
+# ---------------------------------------------------------
+def get_universe_source(ticker: str):
+    """
+    Returns the index universe source for a ticker:
+    - SP500
+    - NASDAQ1000
+    - OTHER (fallback)
+    """
+    if ticker in sp500:
+        return "SP500"
+    elif ticker in nasdaq1000:
+        return "NASDAQ1000"
+    return "OTHER"
 

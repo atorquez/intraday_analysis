@@ -100,7 +100,7 @@ with st.sidebar:
         "Weak Fundamentals Warning (< X)",
         min_value=30,
         max_value=70,
-        value=50,
+        value=30,
         step=5,
         key="weak_fund_threshold",
         help="Stocks with Fund Score below this get a ⚠️ warning"
@@ -110,7 +110,7 @@ with st.sidebar:
         "Strong Fundamentals Highlight (≥ X)",
         min_value=60,
         max_value=95,
-        value=80,
+        value=60,
         step=5,
         key="strong_fund_threshold",
         help="Stocks with Fund Score above this get a ✅ highlight"
@@ -150,7 +150,7 @@ with col1:
     intraday_signal_filter = st.multiselect(
         "Filter by Intraday Buy Signal",
         ["Strong Intraday", "Intraday Buy", "Neutral", "Avoid"],
-        default=["Strong Intraday", "Intraday Buy", "Neutral", "Avoid"],
+        default=["Strong Intraday", "Intraday Buy"],
         key="intraday_signal_filter"
     )
 
@@ -159,13 +159,13 @@ with col2:
     execution_filter = st.multiselect(
         "Filter by Execution Readiness",
         ["Ready", "Crossing Soon", "Intraday False Ready", "Setup Only", "UNKNOWN"],
-        default=["Ready"],
+        default=["Ready","Crossing Soon"],
         key="intraday_execution_filter"
     )
 
 with col3:
-    min_price = st.number_input("Minimum Price ($)", value=5.0, key="intraday_min_price")
-    max_price = st.number_input("Maximum Price ($)", value=50.0, key="intraday_max_price")
+    min_price = st.number_input("Minimum Price ($)", value=50.0, key="intraday_min_price")
+    max_price = st.number_input("Maximum Price ($)", value=200.0, key="intraday_max_price")
 
 st.markdown("### 🎯 Position Management Filter")
 position_filter = st.multiselect(

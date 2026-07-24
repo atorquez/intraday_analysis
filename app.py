@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore")
 
 import streamlit as st
 
-st.set_page_config(page_title="SPC Market Diagnostics", layout="wide")
+st.set_page_config(page_title="Wishing Well", layout="wide")
 
-st.title("📊 SPC Market Diagnostics Platform")
+st.title("📊 Wishing Well")
 st.write("Choose a module from the left sidebar to begin.")
