@@ -1,3 +1,49 @@
+import sys
+import os
+
+# ---------------------------------------------------------
+# ROBUST PATH RESOLUTION (Works locally + Streamlit Cloud)
+# ---------------------------------------------------------
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Project root = parent folder of /pages
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
+
+# utils folder inside project root
+UTILS_PATH = os.path.join(PROJECT_ROOT, "utils")
+
+# Add utils folder to sys.path
+if UTILS_PATH not in sys.path:
+    sys.path.append(UTILS_PATH)
+
+print(">>> CURRENT_DIR:", CURRENT_DIR)
+print(">>> PROJECT_ROOT:", PROJECT_ROOT)
+print(">>> UTILS_PATH:", UTILS_PATH)
+
+# ---------------------------------------------------------
+# IMPORT MODULES
+# ---------------------------------------------------------
+import importlib
+import analysis.intraday_ranker_v3 as v3
+importlib.reload(v3)
+print(">>> USING FILE:", v3.__file__)
+
+rank_universe = v3.rank_universe
+
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+
+# Import directly from utils folder
+from data_fetch import load_universe, get_universe_source
+
+st.set_page_config(layout="wide")
+st.caption("Version: 2026-07-21")
+st.title("📈 Structural Engine Page1")
+
+# ---------------------------------------------------------
+# IMPORT MODULES
+# ---------------------------------------------------------
 import importlib
 import analysis.intraday_ranker_v3 as v3
 importlib.reload(v3)
@@ -9,11 +55,14 @@ rank_universe = v3.rank_universe
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from utils.data_fetch import load_universe, get_universe_source
+
+# Import directly from utils folder
+from data_fetch import load_universe, get_universe_source
 
 st.set_page_config(layout="wide")
 st.caption("Version: 2026-07-21")
 st.title("📈 Structural Engine Page1")
+
 
 # ---------------------------------------------------------
 # INDEX TREND FUNCTIONS
