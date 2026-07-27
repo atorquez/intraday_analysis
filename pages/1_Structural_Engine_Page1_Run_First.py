@@ -8,6 +8,9 @@ rank_universe = v3.rank_universe
 
 import streamlit as st
 import pandas as pd
+from datetime import datetime
+import pytz
+
 from utils.data_fetch import load_universe, get_universe_source
 
 st.set_page_config(layout="wide")
@@ -121,14 +124,27 @@ execution_filter = st.multiselect(
 # ---------------------------------------------------------
 # RUN RANKER
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# RUN RANKER
+# ---------------------------------------------------------
 run_model = st.button("Run Intraday Model", key="intraday_run_button")
 
 if run_model:
     import time
     start_time = time.time()
-    st.write(f"⏱️ Start Time: {pd.Timestamp.now()}")
+
+    # --- FIX: Local EDT time ---
+    from datetime import datetime
+    import pytz
+
+    eastern = pytz.timezone("US/Eastern")
+    now_est = datetime.now().astimezone(eastern)
+
+    st.markdown(f"⏱️ Start Time: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
+
 
     progress_bar = st.progress(0, text="Loading universe...")
+
 
     try:
         base_universe = load_universe()
