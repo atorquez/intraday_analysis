@@ -1,7 +1,7 @@
 sp500 = [
 "MMM","AOS","ABT","ABBV","ACN","ADBE","AMD","AES","AFL","A",
 "APD","ABNB","AKAM","ALB","ARE","ALGN","ALLE","LNT","ALL","GOOGL",
-"GOOG","MO","AMZN","AMCR","AEE","AEP","AXP","AIG","AMT","AWK",
+"GOOG","MO","AMZN","AMCR","AEE","AEP","AXP","AIG","AMT","K",
 "AMP","ABC","AME","AMGN","APH","ADI","ANSS","AON","APA","AAPL",
 "AMAT","APTV","ACGL","ADM","ANET","AJG","AIZ","T","ATO","ADSK",
 "AZO","AVB","AVY","AXON","BKR","BALL","BAC","BBWI","BAX","BDX",
