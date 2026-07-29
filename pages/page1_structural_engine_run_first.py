@@ -1,4 +1,7 @@
+from fileinput import close
 import importlib
+
+from yfinance import ticker
 import analysis.intraday_ranker_v3 as v3
 importlib.reload(v3)
 print(">>> USING FILE:", v3.__file__)
@@ -124,9 +127,6 @@ execution_filter = st.multiselect(
 # ---------------------------------------------------------
 # RUN RANKER
 # ---------------------------------------------------------
-# ---------------------------------------------------------
-# RUN RANKER
-# ---------------------------------------------------------
 run_model = st.button("Run Intraday Model", key="intraday_run_button")
 
 if run_model:
@@ -136,15 +136,11 @@ if run_model:
     # --- FIX: Local EDT time ---
     from datetime import datetime
     import pytz
-
     eastern = pytz.timezone("US/Eastern")
     now_est = datetime.now().astimezone(eastern)
-
     st.markdown(f"⏱️ Start Time: {now_est.strftime('%Y-%m-%d %H:%M:%S')}")
 
-
     progress_bar = st.progress(0, text="Loading universe...")
-
 
     try:
         base_universe = load_universe()
@@ -166,6 +162,92 @@ if run_model:
         ranking["SP500_Trend"] = sp500_trend
         ranking["NASDAQ_Trend"] = nasdaq_trend
         ranking["Market_Regime"] = regime
+
+        # ---------------------------------------------------------
+        # ADD SRC (Structural Recovery Candidate)
+        # ---------------------------------------------------------
+        import yfinance as yf
+
+        def to_scalar(x):
+            """Safely convert pandas/numpy scalars or Series to float."""
+            try:
+                if hasattr(x, "item"):
+                    return float(x.item())
+                return float(x)
+            except Exception:
+                try:
+                    return float(x.iloc[-1])
+                except Exception:
+                    return float(x)
+
+        def compute_drop_pct(prev_close, current_price):
+            prev_close = to_scalar(prev_close)
+            current_price = to_scalar(current_price)
+            return (prev_close - current_price) / prev_close if prev_close > 0 else 0
+
+        def compute_recovery_probability(ticker):
+            df = yf.download(ticker, period="60d", interval="1d", progress=False)
+            if df.empty or len(df) < 10:
+                return 0.0
+
+            recoveries = 0
+            total = len(df)
+
+            for i in range(total):
+                low = to_scalar(df["Low"].iloc[i])
+                close = to_scalar(df["Close"].iloc[i])
+                high = to_scalar(df["High"].iloc[i])
+
+                dip = high - low
+                recovered = close - low
+
+                if dip > 0 and recovered >= 0.5 * dip:
+                    recoveries += 1
+
+            return recoveries / total
+
+        def ema9_cross_ema20_intraday(ticker):
+            df = yf.download(ticker, period="1d", interval="5m", progress=False)
+            if df.empty or len(df) < 20:
+                return False
+
+            df["EMA9"] = df["Close"].ewm(span=9).mean()
+            df["EMA20"] = df["Close"].ewm(span=20).mean()
+
+            ema9 = to_scalar(df["EMA9"].iloc[-1])
+            ema20 = to_scalar(df["EMA20"].iloc[-1])
+
+            return ema9 > ema20
+
+        # Prime Time filter (10:00–11:30 EST)
+        prime_time = (now_est.hour == 10) or (now_est.hour == 11 and now_est.minute <= 30)
+
+        src_flags = []
+        for idx, row in ranking.iterrows():
+            ticker = row["Ticker"]
+            current_price = to_scalar(row["Close"])
+
+            df_daily = yf.download(ticker, period="10d", interval="1d", progress=False)
+            if df_daily.empty or len(df_daily) < 2:
+                src_flags.append(False)
+                continue
+
+            prev_close = to_scalar(df_daily["Close"].iloc[-2])
+            drop_pct = compute_drop_pct(prev_close, current_price)
+            recovery_prob = compute_recovery_probability(ticker)
+            ema_cross = ema9_cross_ema20_intraday(ticker)
+
+            SRC = (
+                drop_pct >= 0.03 and
+                recovery_prob >= 0.60 and
+                ema_cross and
+                regime in ["Bearish", "Choppy"] and
+                prime_time
+            )
+
+            src_flags.append(SRC)
+
+        ranking["SRC"] = src_flags
 
         progress_bar.progress(0.6, text="Applying filters...")
 
@@ -206,10 +288,13 @@ if run_model:
 
                 display_df = display_df.drop(columns=["Universe"])
 
-                # Add trend indicators to display
+                # Add trend indicators
                 display_df["SP500_Trend"] = sp500_trend
                 display_df["NASDAQ_Trend"] = nasdaq_trend
                 display_df["Market_Regime"] = regime
+
+                # Add SRC flag
+                display_df["SRC"] = display_df["SRC"].apply(lambda x: "YES" if x else "")
 
                 styled = display_df.style.apply(color_execution_column, axis=None)
 
@@ -225,11 +310,15 @@ if run_model:
         elapsed = end_time - start_time
         st.write(f"⏱️ End Time: {pd.Timestamp.now()}")
         st.write(f"⚡ Total Runtime: {elapsed:.2f} seconds")
-    
+
     except Exception as e:
         progress_bar.empty()
         st.error(f"Model execution failed: {str(e)}")
         st.exception(e)
+
+# ---------------------------------------------------------
+# RENDER STORED RESULTS
+# ---------------------------------------------------------
 
 # ---------------------------------------------------------
 # RENDER STORED RESULTS
