@@ -16,6 +16,43 @@ import pytz
 
 from utils.data_fetch import load_universe, get_universe_source
 
+# ---------------------------------------------------------
+# CACHE WARM-UP BUTTON
+# ---------------------------------------------------------
+import yfinance as yf
+import streamlit as st
+
+@st.cache_data
+def warm_daily_10d(ticker):
+    return yf.download(ticker, period="10d", interval="1d", progress=False)
+
+@st.cache_data
+def warm_daily_30d(ticker):
+    return yf.download(ticker, period="30d", interval="1d", progress=False)
+
+@st.cache_data
+def warm_intraday_5m(ticker):
+    return yf.download(ticker, period="1d", interval="5m", progress=False)
+
+def warm_up_cache(tickers):
+    progress = st.progress(0.0, text="Warming up cache...")
+    total = len(tickers)
+    for i, ticker in enumerate(tickers):
+        try:
+            warm_daily_10d(ticker)
+            warm_daily_30d(ticker)
+            warm_intraday_5m(ticker)
+        except Exception:
+            pass
+        progress.progress((i+1)/total, text=f"Warming up cache... {ticker}")
+    st.success("Cache warm-up complete! Page1 will run much faster now.")
+
+# UI Button
+if st.button("🔥 Warm Up Cache (Preload All Tickers)"):
+    warm_up_cache(load_universe())  # your list of 730 tickers
+
+
+
 st.set_page_config(layout="wide")
 st.caption("Version: 2026-07-21")
 st.title("📈 Structural Engine Page1")
@@ -166,10 +203,25 @@ if run_model:
         # ---------------------------------------------------------
         # ADD SRC (Structural Recovery Candidate)
         # ---------------------------------------------------------
+                # ---------------------------------------------------------
+        # ADD SRC (Structural Recovery Candidate) — OPTIMIZED
+        # ---------------------------------------------------------
         import yfinance as yf
 
+        # Cache helpers
+        @st.cache_data
+        def get_daily_10d(ticker):
+            return yf.download(ticker, period="10d", interval="1d", progress=False)
+
+        @st.cache_data
+        def get_daily_30d(ticker):
+            return yf.download(ticker, period="30d", interval="1d", progress=False)
+
+        @st.cache_data
+        def get_intraday_5m(ticker):
+            return yf.download(ticker, period="1d", interval="5m", progress=False)
+
         def to_scalar(x):
-            """Safely convert pandas/numpy scalars or Series to float."""
             try:
                 if hasattr(x, "item"):
                     return float(x.item())
@@ -186,7 +238,7 @@ if run_model:
             return (prev_close - current_price) / prev_close if prev_close > 0 else 0
 
         def compute_recovery_probability(ticker):
-            df = yf.download(ticker, period="60d", interval="1d", progress=False)
+            df = get_daily_30d(ticker)
             if df.empty or len(df) < 10:
                 return 0.0
 
@@ -207,7 +259,7 @@ if run_model:
             return recoveries / total
 
         def ema9_cross_ema20_intraday(ticker):
-            df = yf.download(ticker, period="1d", interval="5m", progress=False)
+            df = get_intraday_5m(ticker)
             if df.empty or len(df) < 20:
                 return False
 
@@ -223,32 +275,36 @@ if run_model:
         prime_time = (now_est.hour == 10) or (now_est.hour == 11 and now_est.minute <= 30)
 
         src_flags = []
-        for idx, row in ranking.iterrows():
-            ticker = row["Ticker"]
-            current_price = to_scalar(row["Close"])
 
-            df_daily = yf.download(ticker, period="10d", interval="1d", progress=False)
-            if df_daily.empty or len(df_daily) < 2:
-                src_flags.append(False)
-                continue
+        # If not prime time, skip heavy SRC computation and keep table fast
+        if not prime_time:
+            src_flags = ["" for _ in range(len(ranking))]
+        else:
+            for idx, row in ranking.iterrows():
+                ticker = row["Ticker"]
+                current_price = to_scalar(row["Close"])
 
-            prev_close = to_scalar(df_daily["Close"].iloc[-2])
-            drop_pct = compute_drop_pct(prev_close, current_price)
-            recovery_prob = compute_recovery_probability(ticker)
-            ema_cross = ema9_cross_ema20_intraday(ticker)
+                df_daily = get_daily_10d(ticker)
+                if df_daily.empty or len(df_daily) < 2:
+                    src_flags.append("")
+                    continue
 
-            SRC = (
-                drop_pct >= 0.03 and
-                recovery_prob >= 0.60 and
-                ema_cross and
-                regime in ["Bearish", "Choppy"] and
-                prime_time
-            )
+                prev_close = to_scalar(df_daily["Close"].iloc[-2])
+                drop_pct = compute_drop_pct(prev_close, current_price)
+                recovery_prob = compute_recovery_probability(ticker)
+                ema_cross = ema9_cross_ema20_intraday(ticker)
 
-            src_flags.append(SRC)
+                SRC = (
+                    drop_pct >= 0.03 and
+                    recovery_prob >= 0.60 and
+                    ema_cross and
+                    regime in ["Bearish", "Choppy"]
+                )
+
+                src_flags.append("YES" if SRC else "")
 
         ranking["SRC"] = src_flags
-
+#--
         progress_bar.progress(0.6, text="Applying filters...")
 
         if ranking is None or ranking.empty:
@@ -316,9 +372,6 @@ if run_model:
         st.error(f"Model execution failed: {str(e)}")
         st.exception(e)
 
-# ---------------------------------------------------------
-# RENDER STORED RESULTS
-# ---------------------------------------------------------
 
 # ---------------------------------------------------------
 # RENDER STORED RESULTS

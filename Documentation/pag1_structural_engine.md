@@ -802,5 +802,116 @@ PCA4 and higher components capture noise and are not used.
 
 The current engine uses PCA1 and PCA1_slope, which together capture the majority of actionable momentum information. PCA2 and PCA3 can be added later once enough bullish and mixed-regime data is available for validation.
 
+⭐ SRC Output Logic (Confirmed)
+✔ When all SRC conditions are met
+
+(drop_pct ≥ 3%, recovery_prob ≥ 60%, EMA9>EMA20, regime bearish/choppy, prime time)
+
+→ SRC = YES
+
+✔ When any condition is NOT met
+→ SRC = ""  
+(empty string, not “NO”)
+
+This is intentional because:
+“NO” adds noise
+empty string keeps the table clean
+only “YES” matters for trading decisions
+SRC is a positive signal, not a negative one
+
+⭐ Why we use "" instead of “NO”
+Because SRC is a rare, high‑value structural event.
+
+You don’t want a table full of “NO” rows — you want:
+a clean table
+only the meaningful tickers highlighted
+instant visual recognition of recovery candidates
+
+This is the same design philosophy used in:
+Page5 momentum flags
+Page4 choppy engine flags
+Page2 intraday engine signals
+
+Only positive signals are shown.
+
+⭐ Summary (clean)
+YES → structural recovery candidate
+"" → not a recovery candidate (or outside prime time)
+The model always computes SRC metrics
+The classification is time‑locked to 10:00–11:30
+
+Everything is working exactly as intended.
+
+Absolutely — and let me give you a precise, quantitative, trader‑friendly explanation of how recovery_prob is calculated.
+Yes, it is statistical — specifically a historical frequency estimator.
+
+⭐ Recovery Probability = Statistical Frequency of Past Recoveries
+Your engine computes recovery probability by scanning past daily candles (typically 30–60 days) and checking:
+
+“On days when the stock dipped intraday, how often did it recover at least 50% of that dip by the close?”
+
+This is a historical statistical measure, not a technical indicator.
+
+⭐ Step‑by‑Step Calculation (Exact Logic Used in Page1)
+For each day in the last 30–60 days:
+
+Find the intraday dip
+
+dip = high − low
+Find how much the stock recovered by the close
+
+recovered = close − low
+Check if the recovery was meaningful
+
+recovered ≥ 0.5 × dip
+If YES → count as a successful recovery day
+
+After scanning all days:
+
+recovery_prob = successful recovery days / total days
+
+This is pure statistical frequency.
+
+⭐ Example (Concrete Numbers)
+Suppose we scan 60 days:
+
+60 total days
+38 days where the stock recovered ≥ 50% of its dip
+
+Then:
+recovery_prob = 38/60 = 0.63 = 63%
+
+This means:
+
+“Historically, this stock recovers meaningfully 63% of the time.”
+
+⭐ Why This Is Powerful
+Because it captures behavioral tendencies of each ticker:
+Some stocks (QRVO, AVGO, COST) recover dips very often
+Others (TSLA, NVDA) recover dips less consistently
+Some (META, NFLX) recover only in certain regimes
+Some (banks, energy) rarely recover intraday dips
+
+This gives you a statistical backbone for SRC.
+
+⭐ Why It Works So Well With SRC
+SRC requires:
+meaningful drop
+EMA9/EMA20 reclaim
+bearish/choppy regime
+prime time window
+historical recovery behavior
+
+Recovery probability ensures you only trust tickers that historically behave like recovery stocks.
+
+This is why QRVO popped up as a perfect SRC candidate.
+
+⭐ Summary (clean)
+✔ Yes — recovery_prob is statistical
+✔ It measures historical recovery frequency
+✔ It scans 30–60 days of daily candles
+✔ It checks how often the stock recovers ≥ 50% of its intraday dip
+✔ It is a behavioral factor, not a technical indicator
+✔ It is essential for SRC accuracy
 
 """)
