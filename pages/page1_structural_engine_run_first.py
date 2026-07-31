@@ -116,6 +116,49 @@ def ema9_cross_ema20_intraday(ticker):
     return to_scalar(df["EMA9"].iloc[-1]) > to_scalar(df["EMA20"].iloc[-1])
 
 # ---------------------------------------------------------
+# ADDITIONAL STRUCTURAL SIGNALS
+# ---------------------------------------------------------
+def compute_high_proximity(ticker):
+    """
+    Returns how close the current price is to the intraday high.
+    0.0 means at the high, higher values mean farther from high.
+    """
+    df = get_intraday_5m(ticker)
+    if df.empty or "High" not in df.columns or "Close" not in df.columns:
+        return None
+
+    current_price = to_scalar(df["Close"].iloc[-1])
+    intraday_high = to_scalar(df["High"].max())
+
+    if intraday_high <= 0:
+        return None
+
+    return (intraday_high - current_price) / intraday_high
+
+
+def compute_bidask_spread(ticker):
+    """
+    Returns bid–ask spread as % of current price.
+    yfinance provides bid/ask only in the fast info API.
+    """
+    try:
+        info = yf.Ticker(ticker).fast_info
+        bid = info.get("bid")
+        ask = info.get("ask")
+        last = info.get("last_price")
+
+        if bid is None or ask is None or last is None:
+            return None
+
+        if last <= 0:
+            return None
+
+        return (ask - bid) / last
+
+    except Exception:
+        return None
+
+# ---------------------------------------------------------
 # MARKET REGIME
 # ---------------------------------------------------------
 def get_index_trend(ticker):
@@ -223,6 +266,28 @@ if run_model:
             ranking["NASDAQ_Trend"] = nasdaq_trend
             ranking["Market_Regime"] = regime
 
+            # ---------------------------------------------------------
+            # ADD HIGH_PROXIMITY AND BIDASK_SPREAD (CORRECTED)
+            # ---------------------------------------------------------
+            high_prox_list = []
+            spread_list = []
+
+            for idx, row in ranking.iterrows():
+                ticker = row["Ticker"]
+
+                high_prox = compute_high_proximity(ticker)
+                spread = compute_bidask_spread(ticker)
+
+                high_prox_list.append(high_prox if high_prox is not None else np.nan)
+                spread_list.append(spread if spread is not None else np.nan)
+
+            # Assign AFTER loop — correct placement
+            ranking["High_Proximity"] = high_prox_list
+            ranking["BidAsk_Spread"] = spread_list
+
+            # ---------------------------------------------------------
+            # SRC BLOCK
+            # ---------------------------------------------------------
             if not prime_time:
                 src_flags = [""] * len(ranking)
             else:
@@ -275,6 +340,13 @@ if run_model:
             display_df = filtered.copy()
             display_df["Ticker"] = display_df.apply(lambda r: f"{r['Ticker']} ({r['Universe']})", axis=1)
             display_df = display_df.drop(columns=["Universe"])
+
+            # Format new structural columns
+            if "High_Proximity" in display_df.columns:
+                display_df["High_Proximity"] = (display_df["High_Proximity"] * 100).round(2)
+
+            if "BidAsk_Spread" in display_df.columns:
+                display_df["BidAsk_Spread"] = (display_df["BidAsk_Spread"] * 100).round(3)
 
             st.subheader(f"🚀 Actionable Structural Matrix Results — {len(display_df)} Tickers")
             st.dataframe(display_df.style.apply(color_execution_column, axis=None), hide_index=True, use_container_width=True)

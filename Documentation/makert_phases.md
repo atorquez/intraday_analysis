@@ -141,4 +141,77 @@ No recovery probability relevance.
 
 After‑hours is not part of structural recovery.
 
+# Structural Day vs Market Day
+
+structural day — today was a macro day
+
+⭐ 1. A +1% or +2% market day does NOT guarantee Page1 candidates
+Today:
+DOW +1.22%
+S&P +1.72%
+NASDAQ +2.82%
+
+But this strength was index-driven, not structural-driven.
+
+Why?
+Because Microsoft +15% distorted the entire NASDAQ.
+When a mega-cap explodes:
+NASDAQ looks strong
+SP500 looks strong
+but individual stocks do NOT show structural setups
+dispersion collapses
+correlation spikes
+anomalies disappear
+
+This is exactly what Page1 is designed to detect.
+
+And today it correctly said:
+
+“Strong market, but weak structural opportunities.”
+
+That’s the right call.
+
+⭐ 2. Yesterday was a structural day — today was a macro day
+Yesterday:
+QRVO dipped
+QRVO recovered
+EMA9 crossed EMA20
+PCA1 anomaly was strong
+execution was aligned
+SRC conditions were met
+
+So Page1 showed strong candidates.
+
+Today:
+no dip
+no recovery
+no structural compression
+no EMA alignment
+no PCA1 anomaly
+no SRC
+late-day data
+index trend = Unknown
+
+So Page1 showed weak candidates.
+
+This is exactly how a structural engine should behave.
+
+⭐ 3. You learned the most important structural trading rule
+You said it perfectly:
+
+“It is good to know the model can give opportunities when the market is not so strong.”
+
+Yes — that’s the entire point of structural trading.
+
+✔ Strong market days → fewer structural opportunities
+✔ Weak or mixed market days → more structural opportunities
+Because structural setups come from:
+mispricing
+compression
+dip → recovery
+anomaly
+institutional flow
+EMA alignment
+
+These happen more often when the market is not trending strongly.
 """)
