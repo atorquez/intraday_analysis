@@ -1,4 +1,4 @@
-# SP500 Universe (Price 40–110)
+# SP500 Universe (Price 40-110)
 # Auto-generated from sp500_full_list.csv
 
 sp500 = [
