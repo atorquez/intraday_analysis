@@ -2,11 +2,11 @@ import pandas as pd
 import os
 
 # ---------------------------------------------------------
-# CLEAN + PRICE FILTER
+# CLEAN + PRICE FILTER FOR SP500
 # ---------------------------------------------------------
-def load_and_filter_nasdaq(csv_path, min_price=40, max_price=110):
+def load_and_filter_sp500(csv_path, min_price=40, max_price=110):
     """
-    Loads NASDAQ full list CSV and filters:
+    Loads SP500 CSV and filters:
     - common stocks only
     - removes ETFs, preferreds, warrants, notes, REITs, LPs, units
     - selects tickers within a price range
@@ -44,7 +44,7 @@ def load_and_filter_nasdaq(csv_path, min_price=40, max_price=110):
             break
 
     if price_col is None:
-        print("ERROR: No usable price column found in CSV.")
+        print("ERROR: No usable price column found in SP500 CSV.")
         print("Columns available:", df.columns.tolist())
         return pd.DataFrame()
 
@@ -67,7 +67,7 @@ def load_and_filter_nasdaq(csv_path, min_price=40, max_price=110):
     # ---------------------------------------------------------
     df_filtered = df[(df["Price"] >= min_price) & (df["Price"] <= max_price)]
 
-    print(f"Tickers in price range {min_price}–{max_price}: {len(df_filtered)}")
+    print(f"SP500 tickers in price range {min_price}–{max_price}: {len(df_filtered)}")
 
     return df_filtered.reset_index(drop=True)
 
@@ -77,9 +77,9 @@ def load_and_filter_nasdaq(csv_path, min_price=40, max_price=110):
 # ---------------------------------------------------------
 def write_universe_file(tickers, output_path, min_price, max_price):
     with open(output_path, "w") as f:
-        f.write(f"# NASDAQ Universe (Price {min_price}–{max_price})\n")
-        f.write("# Auto-generated from nasdaq_full_list.csv\n\n")
-        f.write("nasdaq1000 = [\n")
+        f.write(f"# SP500 Universe (Price {min_price}–{max_price})\n")
+        f.write("# Auto-generated from sp500_full_list.csv\n\n")
+        f.write("sp500 = [\n")
         for t in tickers:
             f.write(f'    "{t}",\n')
         f.write("]\n")
@@ -91,19 +91,19 @@ def write_universe_file(tickers, output_path, min_price, max_price):
 # ---------------------------------------------------------
 # MAIN SCRIPT
 # ---------------------------------------------------------
-def generate_nasdaq_price_universe(min_price=40, max_price=110):
-    csv_path = "data/nasdaq_full_list.csv"
-    output_path = "data/nasdaq1000_list.py"
+def generate_sp500_price_universe(min_price=40, max_price=110):
+    csv_path = "data/sp500_full_list.csv"
+    output_path = "data/sp500_list.py"
 
     if not os.path.exists(csv_path):
         print(f"ERROR: File not found → {csv_path}")
         return
 
-    print("Loading NASDAQ full list...")
-    df_filtered = load_and_filter_nasdaq(csv_path, min_price=min_price, max_price=max_price)
+    print("Loading SP500 full list...")
+    df_filtered = load_and_filter_sp500(csv_path, min_price=min_price, max_price=max_price)
 
     if df_filtered.empty:
-        print("ERROR: No tickers found in the specified price range.")
+        print("ERROR: No SP500 tickers found in the specified price range.")
         return
 
     tickers = df_filtered["Symbol"].tolist()
@@ -112,4 +112,4 @@ def generate_nasdaq_price_universe(min_price=40, max_price=110):
 
 
 if __name__ == "__main__":
-    generate_nasdaq_price_universe(min_price=40, max_price=110)
+    generate_sp500_price_universe(min_price=40, max_price=110)

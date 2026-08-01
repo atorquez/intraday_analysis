@@ -221,8 +221,8 @@ def color_execution_column(df):
 # INTERACTIVE USER INTERFACE FILTERS PANEL
 # ---------------------------------------------------------
 st.markdown("### 🔍 Price Boundaries Filter")
-min_price = st.number_input("Minimum Asset Close Gate Price", value=50.0, key="intraday_min_price")
-max_price = st.number_input("Maximum Asset Close Gate Price", value=100, key="intraday_max_price")
+min_price = st.number_input("Minimum Asset Close Gate Price", value=40.0, key="intraday_min_price")
+max_price = st.number_input("Maximum Asset Close Gate Price", value=110, key="intraday_max_price")
 
 st.markdown("### 🎛️ Anomaly Multi-Factor Filters")
 pca_filter = st.slider("Minimum PCA1 Vector Strength (Institutional Filter)", min_value=-5.0, max_value=5.0, value=0.0, step=0.1)

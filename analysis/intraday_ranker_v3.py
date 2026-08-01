@@ -135,11 +135,11 @@ def append_pca_components(df, is_intraday=True):
 # DAILY INDICATOR + EXECUTION ENGINE (HYBRID)
 # ---------------------------------------------------------
 def calculate_indicators(df):
-    if df is None or df.empty or len(df) < 50:
+    if df is None or df.empty or len(df) < 40:
         return None
 
     # PREMIUM FILTER — test premium-only universe
-    if float(df["Close"].iloc[-1]) < 50:
+    if float(df["Close"].iloc[-1]) < 40:
         return None
 
     df = append_pca_components(df.copy(), is_intraday=False)

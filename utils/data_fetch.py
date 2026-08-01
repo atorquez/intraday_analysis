@@ -53,8 +53,8 @@ def get_last_10_closes(symbol: str):
 # ---------------------------------------------------------
 # LOAD UNIVERSE (SP500 + NASDAQ1000)
 # ---------------------------------------------------------
-from data.sp500_list import sp500
-from data.nasdaq1000 import nasdaq1000
+from data.sp500_list import sp500          # NEW filtered SP500 (174)
+from data.nasdaq1000_list import nasdaq1000   # NEW filtered NASDAQ (332)
 
 def load_universe():
     """
