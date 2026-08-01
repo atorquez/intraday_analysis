@@ -3,7 +3,6 @@
 # SPECIFICATION: PREMIUM UNIVERSE STRUCTURAL TRACKING SYSTEM (>$50 TICKERS)
 # INCLUDES: HIGH-SPEED PROXIMITY, SPREADS, AND adaptive INDEX REGIME PLUGINS
 # ==============================================================================
-
 import streamlit as st
 
 # Secure Layout Initialization Layer (Must be the absolute first execution point)
