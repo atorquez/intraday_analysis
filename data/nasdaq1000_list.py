@@ -1,3 +1,6 @@
+# NASDAQ1000 Universe (Price 40-110)
+# Auto-generated from nasdaq_full_list.csv
+
 nasdaq1000 = [
     "INTC",
     "IBKR",

@@ -7,7 +7,7 @@ import streamlit as st
 
 # Secure Layout Initialization Layer (Must be the absolute first execution point)
 st.set_page_config(layout="wide", page_title="Structural Engine Page1")
-st.caption("Version: 2026-07-23")
+st.caption("Version: 2026-08-01")
 st.title("📈 Structural Engine Page 1")
 
 import importlib
@@ -229,7 +229,7 @@ pca_filter = st.slider("Minimum PCA1 Vector Strength (Institutional Filter)", mi
 execution_filter = st.multiselect(
     "Filter by Real-Time Structural Execution Status",
     ["Watch List", "Not Watch List", "Crossing Soon", "Setup Only"],
-    default=["Watch List", "Crossing Soon"],
+    default=["Crossing Soon"],
     key="intraday_execution_filter"
 )
 

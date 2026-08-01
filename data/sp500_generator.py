@@ -77,7 +77,7 @@ def load_and_filter_sp500(csv_path, min_price=40, max_price=110):
 # ---------------------------------------------------------
 def write_universe_file(tickers, output_path, min_price, max_price):
     with open(output_path, "w") as f:
-        f.write(f"# SP500 Universe (Price {min_price}–{max_price})\n")
+        f.write(f"# SP500 Universe (Price {min_price}-{max_price})\n")
         f.write("# Auto-generated from sp500_full_list.csv\n\n")
         f.write("sp500 = [\n")
         for t in tickers:
