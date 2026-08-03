@@ -345,30 +345,34 @@ if run_model:
             ranking["BidAsk_Spread"] = ranking["Ticker"].map(spread_dict)
             ranking["SRC_Flag"] = ranking["Ticker"].map(src_flags_dict)
 
-        def compute_opp_score(trend, score, high_prox, spread):
-            trend_map = {"down": 1, "flat": 2, "up": 3}
-            trend_score = trend_map.get(str(trend).lower(), 1)
+        # ---------------------------------------------------------
+        # OPPORTUNITY SCORING ENGINE (VECTORIZED & FAIL-SAFE)
+        # ---------------------------------------------------------
+        # Comprehensive trend classification dictionary to prevent string matching drop-offs
+        trend_map = {
+            "down": 1, "downtrend": 1, "bearish": 1,
+            "flat": 2, "mixed": 2, "choppy": 2,
+            "up": 3, "uptrend": 3, "bullish": 3
+        }
 
-            score_score = 1 if score < 2 else 2
-            highprox_score = 1 if high_prox > 0.5 else 2
-            spread_score = 1 if spread > 0.5 else 2
+        # 1. Cleanse text vectors and standardize mapping keys
+        clean_trend = ranking["Trend"].astype(str).str.lower().str.strip().map(trend_map).fillna(1)
 
-            return (
-                trend_score * 3 +
-                score_score * 2 +
-                highprox_score * 2 +
-                spread_score * 1
-            )
+        # 2. Force conversion to float numeric arrays to safeguard against thread pool type mutations
+        clean_score = pd.to_numeric(ranking["Score"], errors='coerce').fillna(0)
+        clean_prox  = pd.to_numeric(ranking["High_Proximity"], errors='coerce').fillna(0)
+        clean_spread = pd.to_numeric(ranking["BidAsk_Spread"], errors='coerce').fillna(1.0) # Assumes max friction on fail
 
-        ranking["Opp_Score"] = [
-            compute_opp_score(
-                row["Trend"],
-                row["Score"],
-                row["High_Proximity"],
-                row["BidAsk_Spread"]
-            )
-            for _, row in ranking.iterrows()
-        ]
+        # 3. Compute structural scoring components using ultra-fast NumPy vector blocks
+        trend_component  = clean_trend * 3
+        score_component  = np.where(clean_score < 2, 1, 2) * 2
+        prox_component   = np.where(clean_prox > 0.5, 1, 2) * 2
+        spread_component = np.where(clean_spread > 0.5, 1, 2) * 1
+
+        # 4. Synthesize factors into the final performance-tuned Opp_Score vector
+        ranking["Opp_Score"] = trend_component + score_component + prox_component + spread_component
+
+
 
         # ---------------------------------------------------------
         # APPLY INTERACTIVE DATAFRAME FILTERS
