@@ -1,4 +1,4 @@
-# utils/data_fetch.py — Restored Stable Version (60‑day window)
+# utils/data_fetch.py — Integrated with Master US Universe
 import yfinance as yf
 import pandas as pd
 
@@ -51,34 +51,39 @@ def get_last_10_closes(symbol: str):
 
 
 # ---------------------------------------------------------
-# LOAD UNIVERSE (SP500 + NASDAQ1000)
+# LOAD UNIVERSE (Unified US Market Basket)
 # ---------------------------------------------------------
-from data.sp500_list import sp500          # NEW filtered SP500 (174)
-from data.nasdaq1000_list import nasdaq1000   # NEW filtered NASDAQ (332)
+try:
+    from data.us_universe_list import us_universe
+except ImportError:
+    print("WARNING: data.us_universe_list not found. Falling back to an empty list.")
+    us_universe = []
 
 def load_universe():
     """
     Returns the combined trading universe for the Intraday Ranker.
-    Includes:
-    - SP500
-    - NASDAQ1000
+    Includes all deduplicated NYSE and NASDAQ tickers ($40–$110).
     """
-    return sorted(list(set(sp500 + nasdaq1000)))
+    return sorted(list(set(us_universe)))
 
 
 # ---------------------------------------------------------
-# UNIVERSE SOURCE HELPER (NEW)
+# UNIVERSE SOURCE HELPER (Upgraded to Exchange Level)
 # ---------------------------------------------------------
 def get_universe_source(ticker: str):
     """
-    Returns the index universe source for a ticker:
-    - SP500
-    - NASDAQ1000
-    - OTHER (fallback)
+    Identifies the underlying exchange for a given ticker symbol.
+    Uses standard US market listing structures to classify:
+    - NASDAQ: Primarily 4-character symbols (e.g., AAPL, MSFT)
+    - NYSE: Primarily 1, 2, or 3-character symbols (e.g., T, KO, JPM)
     """
-    if ticker in sp500:
-        return "SP500"
-    elif ticker in nasdaq1000:
-        return "NASDAQ1000"
-    return "OTHER"
-
+    clean_ticker = ticker.strip().upper()
+    
+    if clean_ticker not in us_universe:
+        return "UNKNOWN"
+        
+    # Standard rule of thumb: NASDAQ uses 4+ letters, NYSE uses 1-3 letters
+    if len(clean_ticker) >= 4:
+        return "NASDAQ"
+    
+    return "NYSE"

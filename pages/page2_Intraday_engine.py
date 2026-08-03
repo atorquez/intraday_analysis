@@ -164,8 +164,8 @@ with col2:
     )
 
 with col3:
-    min_price = st.number_input("Minimum Price ($)", value=50.0, key="intraday_min_price")
-    max_price = st.number_input("Maximum Price ($)", value=200.0, key="intraday_max_price")
+    min_price = st.number_input("Minimum Price ($)", value=40.0, key="intraday_min_price")
+    max_price = st.number_input("Maximum Price ($)", value=110.0, key="intraday_max_price")
 
 st.markdown("### 🎯 Position Management Filter")
 position_filter = st.multiselect(

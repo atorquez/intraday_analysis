@@ -256,6 +256,9 @@ def render_results(filtered, ranking_len, regime, sp500_trend, nasdaq_trend):
         st.dataframe(display_df.style.apply(color_execution_column, axis=None), hide_index=True, use_container_width=True)
 
 # ---------------------------------------------------------
+# RUN MODEL MOTOR ENGINE
+# ---------------------------------------------------------
+# ---------------------------------------------------------
 # RUN MODEL MOTOR ENGINE — PARALLELIZED EXECUTION LOOP
 # ---------------------------------------------------------
 run_model = st.button("Run Intraday Model Scan", key="intraday_run_button")
@@ -345,31 +348,6 @@ if run_model:
             ranking["BidAsk_Spread"] = ranking["Ticker"].map(spread_dict)
             ranking["SRC_Flag"] = ranking["Ticker"].map(src_flags_dict)
 
-        def compute_opp_score(trend, score, high_prox, spread):
-            trend_map = {"down": 1, "flat": 2, "up": 3}
-            trend_score = trend_map.get(str(trend).lower(), 1)
-
-            score_score = 1 if score < 2 else 2
-            highprox_score = 1 if high_prox > 0.5 else 2
-            spread_score = 1 if spread > 0.5 else 2
-
-            return (
-                trend_score * 3 +
-                score_score * 2 +
-                highprox_score * 2 +
-                spread_score * 1
-            )
-
-        ranking["Opp_Score"] = [
-            compute_opp_score(
-                row["Trend"],
-                row["Score"],
-                row["High_Proximity"],
-                row["BidAsk_Spread"]
-            )
-            for _, row in ranking.iterrows()
-        ]
-
         # ---------------------------------------------------------
         # APPLY INTERACTIVE DATAFRAME FILTERS
         # ---------------------------------------------------------
@@ -398,13 +376,6 @@ if run_model:
         # Render layout panel results out to user interface viewport
         render_results(filtered_df, len(ranking) if ranking is not None else 0, regime, sp500_trend, nasdaq_trend)
         st.success(f"⚡ Intraday scan finished in {(time.time() - start_time):.2f} seconds.")
-
-        # Save clean states to Session Memory
-        st.session_state["intraday_filtered_results"] = ranking
-        st.session_state["intraday_visual_results"] = filtered_df
-        st.session_state["intraday_regime"] = regime
-        st.session_state["intraday_sp500"] = sp500_trend
-        st.session_state["intraday_nasdaq"] = nasdaq_trend
 
     except Exception as master_err:
         st.error(f"ENGINE CRASH: An unexpected error occurred inside the execution controller loop: {master_err}")

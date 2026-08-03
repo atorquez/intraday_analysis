@@ -84,12 +84,12 @@ def load_index_intraday(symbol: str) -> pd.DataFrame:
 # INTERACTIVE CONTROL PANEL (DESIGNED FOR INTERVAL RUNS)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Page5 Momentum Engine", layout="wide")
-st.title("🚀 Page5 — Premium Momentum Engine (> $50)")
+st.title("🚀 Page5 — Premium Momentum Engine (> $40)")
 st.write("Ranks premium equities decoupling from weak, bearish, or choppy markets using multi-factor anomaly scoring.")
 
 col1, col2 = st.columns(2)
 with col1:
-    price_floor = st.number_input("Minimum Price Gate", value=50.00, step=5.0)
+    price_floor = st.number_input("Minimum Price Gate", value=40.00, step=5.0)
 with col2:
     run_scan = st.button("Execute Momentum Scan")
 
