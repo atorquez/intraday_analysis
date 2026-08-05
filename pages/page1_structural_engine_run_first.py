@@ -1,13 +1,13 @@
 # ==============================================================================
-# 📈 STRUCTURAL ENGINE — COMPLETE UNIFIED MASTER CODE (FULLY PATCHED)
-# SPECIFICATION: PREMIUM UNIVERSE STRUCTURAL TRACKING SYSTEM ($40–$110 TICKERS)
+# 📈 STRUCTURAL ENGINE PAGE 1 — COMPLETE UNIFIED MASTER CODE
+# SPECIFICATION: PREMIUM UNIVERSE STRUCTURAL TRACKING SYSTEM (>$50 TICKERS)
+# INCLUDES: HIGH-SPEED PROXIMITY, SPREADS, AND MULTI-CORE ESTIMATIONS
 # ==============================================================================
 import streamlit as st
 
-# Secure Layout Initialization Layer (Must be the absolute first execution point)
-st.set_page_config(layout="wide", page_title="Structural Engine Master")
+st.set_page_config(layout="wide", page_title="Structural Engine Page1")
 st.caption("Version: 2026-08-01")
-st.title("📈 Structural Engine Master Dashboard")
+st.title("📈 Structural Engine Page 1")
 
 import importlib
 import time
@@ -16,399 +16,381 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime
 import pytz
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Secure Dynamic Reloading Components from backend file
 import analysis.intraday_ranker_v3 as v3
 importlib.reload(v3)
-rank_universe = v3.rank_universe
 
-from utils.data_fetch import load_universe, get_universe_source
+try:
+    from utils.data_fetch import load_universe, get_universe_source
+except (ImportError, ModuleNotFoundError):
+    def load_universe(): return []
+    def get_universe_source(ticker): return "Premium Slot"
 
 # ---------------------------------------------------------
 # CORRELATED BACKEND-ALIGNED PRELOAD CORES
 # ---------------------------------------------------------
 def _flatten_columns(df):
-    """Safely flatten MultiIndex columns from yfinance downloads without in-place mutation."""
     if df is None or df.empty:
         return df
-    df_copy = df.copy()  # Prevents cache data corruption across threads
+    df_copy = df.copy()
     if isinstance(df_copy.columns, pd.MultiIndex):
-        df_copy.columns = df_copy.columns.get_level_values(0)
+        if len(df_copy.columns.levels) > 1:
+            df_copy.columns = df_copy.columns.get_level_values(0)
+        else:
+            df_copy.columns = [col if isinstance(col, tuple) else col for col in df_copy.columns]
+    df_copy.columns = [str(c).strip() for c in df_copy.columns]
     return df_copy
 
-@st.cache_data(ttl=28800)
-def warm_daily_backend(ticker):
-    df = yf.download(ticker, period="3mo", interval="1d", progress=False, threads=False)
-    return _flatten_columns(df)
+@st.cache_data(ttl=120, show_spinner=False)
+def fetch_clean_market_batch(tickers_tuple):
+    ticker_list = list(tickers_tuple)
+    if not ticker_list:
+        return pd.DataFrame(), pd.DataFrame()
+    try:
+        raw_daily = yf.download(ticker_list, period="3mo", interval="1d", group_by="ticker", progress=False, threads=True)
+        raw_intra = yf.download(ticker_list, period="1d", interval="1m", group_by="ticker", progress=False, threads=True)
+        return raw_daily, raw_intra
+    except Exception as e:
+        st.error(f"Batch synchronization layer failed: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=1800)
-def warm_intraday_backend(ticker):
-    df = yf.download(ticker, period="1d", interval="1m", progress=False, threads=False)
-    return _flatten_columns(df)
+def extract_ticker_slice(batch_df, ticker):
+    try:
+        if batch_df is None or batch_df.empty:
+            return pd.DataFrame()
+        if isinstance(batch_df.columns, pd.MultiIndex):
+            if ticker in batch_df.columns.get_level_values(0):
+                return batch_df[ticker].copy().dropna(subset=["Close"])
+            elif ticker in batch_df.columns.get_level_values(1):
+                return batch_df.xs(ticker, axis=1, level=1).copy().dropna(subset=["Close"])
+        if ticker in batch_df.columns:
+            return batch_df[[ticker]].copy().dropna(subset=["Close"])
+        return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
-@st.cache_data(ttl=1800)
-def get_intraday_5m(ticker):
-    df = yf.download(ticker, period="1d", interval="5m", progress=False, threads=False)
-    return _flatten_columns(df)
-
-def warm_up_cache(tickers):
-    """High-speed parallelized preloader to handle 729+ tickers without crashing."""
-    progress = st.progress(0.0, text="Initializing high-speed parallel local data cache preloader...")
-    total = len(tickers)
-    
-    def _warm_single(ticker):
-        try:
-            warm_daily_backend(ticker)
-            warm_intraday_backend(ticker)
-            get_intraday_5m(ticker)
-            return True
-        except Exception:
-            return False
-
-    completed = 0
-    # Uses 15 threads to download historical chunks rapidly safely
-    with ThreadPoolExecutor(max_workers=15) as executor:
-        futures = {executor.submit(_warm_single, t): t for t in tickers}
-        for future in as_completed(futures):
-            completed += 1
-            ticker = futures[future]
-            if completed % 15 == 0 or completed == total:
-                progress.progress(completed / total, text=f"Hydrating Caches: [{ticker}] ({completed}/{total})")
-                
-    st.success("High-speed data pre-loading complete! Structural scans will execute smoothly now.")
-
-if st.button("🔥 Preload and Warm Up Local System Memory"):
-    warm_up_cache(load_universe())
-
-# ---------------------------------------------------------
-# SCALAR EXTRACTION & MATHEMATICAL HELPERS
-# ---------------------------------------------------------
 def to_scalar(x):
     try:
         if hasattr(x, "item"):
             return float(x.item())
         if isinstance(x, (pd.Series, np.ndarray)):
-            return float(x[-1])
+            val = x.squeeze()
+            if hasattr(val, "item"):
+                return float(val.item())
+            return float(val[-1] if isinstance(val, (np.ndarray, list)) else val)
         return float(x)
     except Exception:
         try:
-            return float(x.iloc[-1])
+            return float(x.iloc[-1].squeeze())
         except Exception:
             return float("nan")
 
 def compute_drop_pct(prev_close, current_price):
     prev_close = to_scalar(prev_close)
     current_price = to_scalar(current_price)
-    return (prev_close - current_price) / prev_close if prev_close > 0 else 0
+    return (prev_close - current_price) / prev_close if prev_close > 0 else 0.0
 
 def compute_recovery_probability(df_daily):
-    if df_daily.empty or len(df_daily) < 30:
+    if df_daily is None or df_daily.empty or len(df_daily) < 40:
         return 0.0
-    
-    df_window = df_daily.tail(30)
+    df_window = df_daily.tail(60).copy()
     recoveries = 0
     total = len(df_window)
-
     for i in range(total):
         low = to_scalar(df_window["Low"].iloc[i])
         close = to_scalar(df_window["Close"].iloc[i])
         high = to_scalar(df_window["High"].iloc[i])
-
         dip = high - low
         recovered = close - low
-
-        if dip > 0 and recovered >= 0.5 * dip:
+        if dip > 0 and recovered >= (0.5 * dip):
             recoveries += 1
-
-    return recoveries / total
-
-def ema9_cross_ema20_intraday(ticker):
-    df = get_intraday_5m(ticker)
-    if df.empty or len(df) < 20:
-        return False
-
-    df["EMA9"] = df["Close"].ewm(span=9).mean()
-    df["EMA20"] = df["Close"].ewm(span=20).mean()
-
-    ema9 = to_scalar(df["EMA9"].iloc[-1])
-    ema20 = to_scalar(df["EMA20"].iloc[-1])
-    return ema9 > ema20
-
-def compute_high_proximity(ticker):
-    try:
-        df = warm_intraday_backend(ticker)
-        if df.empty:
-            return None
-        daily_high = float(df["High"].max())
-        current_price = float(df["Close"].iloc[-1])
-        if current_price <= 0:
-            return 0.0
-        return (daily_high - current_price) / current_price
-    except Exception:
-        return None
-
-def compute_bidask_spread(ticker):
-    try:
-        df = warm_intraday_backend(ticker)
-        if df.empty:
-            return None
-        current_price = float(df["Close"].iloc[-1])
-        if current_price <= 0:
-            return 0.0
-        recent_minute_spread = (df["High"] - df["Low"]).tail(5).mean()
-        implied_spread = recent_minute_spread * 0.15 
-        return implied_spread / current_price
-    except Exception:
-        return None
+    return float(recoveries / total)
 
 # ---------------------------------------------------------
-# MARKET REGIME VECTOR CLASSIFIERS
+# MASTER VECTORIZED EXTRACTION INTERFACE (INSTITUTIONAL GATES HARDENED)
+# ---------------------------------------------------------
+def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_price):
+    rows = []
+    if batch_daily is None or batch_daily.empty or batch_intra is None or batch_intra.empty:
+        return pd.DataFrame()
+
+    available_daily = set(batch_daily.columns.get_level_values(0)) if hasattr(batch_daily, "columns") else set()
+    available_intra = set(batch_intra.columns.get_level_values(0)) if hasattr(batch_intra, "columns") else set()
+    active_pool = list(set(tickers).intersection(available_daily).intersection(available_intra))
+
+    for ticker in active_pool:
+        try:
+            daily_df = batch_daily[ticker].copy().dropna(subset=["Close"])
+            intraday_df = batch_intra[ticker].copy().dropna(subset=["Close"])
+            
+            if daily_df.empty or intraday_df.empty or len(daily_df) < 40:
+                continue
+
+            # Capacity Gate Liquidity Baseline Validation Slices
+            vol_d = daily_df["Volume"].values
+            avg_volume_20d = float(np.mean(vol_d[-20:])) if len(vol_d) >= 20 else float(vol_d[-1])
+            if avg_volume_20d < 250000:
+                continue
+
+            current_price = float(daily_df["Close"].iloc[-1].squeeze() if hasattr(daily_df["Close"].iloc[-1], "squeeze") else daily_df["Close"].iloc[-1])
+            if current_price < min_price or current_price > max_price:
+                continue
+
+            # Isolate Intraday Arrays early for Institutional Safety Protection Gates
+            close_intra = intraday_df["Close"].values
+            high_intra = intraday_df["High"].values
+            low_intra = intraday_df["Low"].values
+            vol_intra = intraday_df["Volume"].values
+            
+            if len(close_intra) < 5:
+                continue
+                
+            current_intraday_price = float(close_intra[-1])
+
+            # ----------------------------------------------------------------------
+            # 🚨 GATE 1: THE INSTITUTIONAL SPREAD GATE (Eliminates Thin Order Books)
+            # ----------------------------------------------------------------------
+            recent_minute_spread = (high_intra[-5:] - low_intra[-5:]).mean()
+            implied_spread = (recent_minute_spread * 0.15) / current_intraday_price
+            
+            # Drop assets immediately if the institutional spread proxy is wider than 0.15%
+            if implied_spread > 0.0015:
+                continue
+
+            # ----------------------------------------------------------------------
+            # 🚨 GATE 2: THE HIGH PROXIMITY EXTENSION GATE (Prevents Chasing Intraday Fades)
+            # ----------------------------------------------------------------------
+            daily_high = float(high_intra.max())
+            high_proximity = (daily_high - current_intraday_price) / current_intraday_price
+            
+            # If the asset has dropped > 2% away from its absolute high, it is a fade. Discard it.
+            if high_proximity > 0.02:
+                continue
+
+            # ----------------------------------------------------------------------
+            # 🚨 GATE 3: THE VWAP SUSTAINABILITY CHECKER (Protects Against Chasing Overextended Peaks)
+            # ----------------------------------------------------------------------
+            cv_slice = vol_intra * close_intra
+            vwap_spot = cv_slice.sum() / vol_intra.sum() if vol_intra.sum() > 0 else current_intraday_price
+            vwap_dist_pct = (current_intraday_price - vwap_spot) / vwap_spot
+
+            # If an asset is extended > 1.5% above institutional fair value, buying risk is high. Block it.
+            if vwap_dist_pct > 0.015:
+                continue
+
+            # ⚡ STRUCTURAL FOUNDATION REMAP ENGINE
+            close_d = daily_df["Close"].values
+            high_d = daily_df["High"].values
+            low_d = daily_df["Low"].values
+
+            ema9_d = daily_df["Close"].ewm(span=9).mean().values
+            ema20_d = daily_df["Close"].ewm(span=20).mean().values
+            ema50_d = daily_df["Close"].ewm(span=50).mean().values
+
+            # Core Macro Anchor Level (EMA20 vs EMA50 structural foundation tracking)
+            if ema20_d[-1] > ema50_d[-1]:
+                trend = "UP"
+            elif ema20_d[-1] < ema50_d[-1]:
+                trend = "DOWN"
+            else:
+                trend = "FLAT"
+
+            ema9_slope = float(ema9_d[-1] - ema9_d[-5])
+            ema20_slope = float(ema20_d[-1] - ema20_d[-5])
+            proximity_metric = abs((ema9_d[-1] - ema20_d[-1]) / (ema20_d[-1] if ema20_d[-1] != 0 else 1.0))
+
+            if ema9_d[-1] > ema20_d[-1] and ema9_slope > 0 and ema20_slope > 0:
+                execution = "Watch List"
+            elif ema9_d[-1] > ema20_d[-1] and (ema9_slope < 0 or ema20_slope < 0):
+                execution = "Not Watch List"
+            elif proximity_metric < 0.003:
+                execution = "Crossing Soon"
+            else:
+                execution = "Setup Only"
+
+            rvol = float(daily_df["Volume"].iloc[-1] / avg_volume_20d) if avg_volume_20d > 0 else 1.0
+            gap_pct = float(((daily_df["Open"].iloc[-1] - close_d[-2]) / close_d[-2]) * 100) if len(close_d) >= 2 else 0.0
+            h_l = high_d - low_d
+            atr = float(np.mean(h_l[-14:])) if len(h_l) >= 14 else float(h_l[-1])
+            atr_pct = (atr / current_price) * 100
+
+            pca1_slope = 0.0
+            ema_curve = 0.0
+            vwap_dist = 0.0
+            roc_10 = 0.0
+            stoch_k = 0.5
+
+            if len(intraday_df) > 5:
+                ema9_i = intraday_df["Close"].ewm(span=9).mean().values
+                ema20_i = intraday_df["Close"].ewm(span=20).mean().values
+                ema_curve = float(ema9_i[-1] - ema20_i[-1])
+                pca1_slope = float(ema9_i[-1] - ema9_i[-5]) 
+                vwap_dist = vwap_dist_pct  # Explicit synchronization with the verified gate output
+
+            prev_close = float(close_d[-2] if len(close_d) >= 2 else current_price)
+            price_vs_close = "Above Close" if current_intraday_price > prev_close else "Below Close" if current_intraday_price < prev_close else "Equal"
+
+            rows.append({
+                "Ticker": ticker,
+                "Universe": get_universe_source(ticker),
+                "Close": round(current_price, 2),
+                "ATR%": round(atr_pct, 2),
+                "RVOL": round(rvol, 2),
+                "Gap%": round(gap_pct, 2),
+                "Trend": trend,
+                "Execution": execution,
+                "PCA1": 0.0,
+                "Avg_Volume_20d": avg_volume_20d,
+                "Price_vs_Close": price_vs_close,
+                "PCA1_slope": pca1_slope,
+                "EMA_Curve": ema_curve,
+                "VWAP_Dist": vwap_dist,
+                "ROC_10": roc_10,
+                "StochK": stoch_k,
+            })
+        except Exception:
+            continue
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["PCA1"] = pd.to_numeric(df["PCA1"], errors="coerce").fillna(0.0)
+    df["PCA1_slope"] = pd.to_numeric(df["PCA1_slope"], errors="coerce").fillna(0.0)
+    df["RVOL"] = pd.to_numeric(df["RVOL"], errors="coerce").fillna(0.0)
+
+    # UN-CLIPPED LOW-LAG PREDICTIVE SCORE MATRIX
+    df["Score"] = (
+        (df["Trend"] == "UP").astype(int) * 2.0 +
+        (df["Execution"] == "Watch List").astype(int) * 1.0 +
+        (df["Execution"] == "Crossing Soon").astype(int) * 4.0 + 
+        df["RVOL"].clip(lower=0) +
+        df["PCA1"] +                       
+        (df["PCA1_slope"] * 3.5)           
+    )
+    return df.sort_values("Score", ascending=False).reset_index(drop=True)
+
+# ---------------------------------------------------------
+# PART 2- REGIME UTILITIES
 # ---------------------------------------------------------
 def get_index_trend(ticker):
     try:
         df = yf.download(ticker, period="5d", interval="5m", progress=False, threads=False)
-        if df.empty:
+        if df is None or df.empty: 
             return "Unknown"
-            
         df = _flatten_columns(df)
         df["EMA9"] = df["Close"].ewm(span=9).mean()
         df["EMA20"] = df["Close"].ewm(span=20).mean()
         df["EMA50"] = df["Close"].ewm(span=50).mean()
-
-        ema9 = float(df["EMA9"].iloc[-1])
-        ema20 = float(df["EMA20"].iloc[-1])
-        ema50 = float(df["EMA50"].iloc[-1])
-        slope20 = float(df["EMA20"].iloc[-1] - df["EMA20"].iloc[-5])
-
-        if ema9 > ema20 > ema50 and slope20 > 0:
+        
+        ema9 = to_scalar(df["EMA9"].iloc[-1])
+        ema20 = to_scalar(df["EMA20"].iloc[-1])
+        ema50 = to_scalar(df["EMA50"].iloc[-1])
+        slope20 = float(to_scalar(df["EMA20"].iloc[-1]) - to_scalar(df["EMA20"].iloc[-5]))
+        
+        if ema9 > ema20 > ema50 and slope20 > 0: 
             return "Bullish"
-        if ema9 < ema20 < ema50 and slope20 < 0:
+        if ema9 < ema20 < ema50 and slope20 < 0: 
             return "Bearish"
         return "Choppy"
-    except Exception:
+    except Exception: 
         return "Unknown"
 
 def classify_regime(sp500_trend, nasdaq_trend):
-    if sp500_trend == "Bullish" and nasdaq_trend == "Bullish":
+    if sp500_trend == "Bullish" and nasdaq_trend == "Bullish": 
         return "Trending"
-    if sp500_trend == "Bearish" and nasdaq_trend == "Bearish":
+    if sp500_trend == "Bearish" and nasdaq_trend == "Bearish": 
         return "Bearish"
-    if sp500_trend != nasdaq_trend:
+    if sp500_trend != nasdaq_trend: 
         return "Mixed"
     return "Choppy"
-
-@st.cache_data(ttl=300, show_spinner=False)
-def cached_rank_universe(tickers_tuple, buy_zone_percentile=0.15):
-    return rank_universe(list(tickers_tuple), buy_zone_percentile)
 
 def color_execution_column(df):
     style_df = pd.DataFrame('', index=df.index, columns=df.columns)
     if "Execution" in df.columns:
         style_df["Execution"] = [
-            "background-color: #4CAF50; color: white;" if v == "Watch List"
-            else "background-color: #FFC107; color: black;" if v == "Crossing Soon"
-            else "background-color: #FF9800; color: white;" if v == "Not Watch List"
-            else "background-color: #9E9E9E; color: white;"
-            for v in df["Execution"]
+            "background-color: #4CAF50; color: white; font-weight: bold;" if str(v) == "Watch List"
+            else "background-color: #FFC107; color: black; font-weight: bold;" if str(v) == "Crossing Soon"
+            else "background-color: #FF9800; color: white;" if str(v) == "Not Watch List"
+            else "background-color: #9E9E9E; color: white;" for v in df["Execution"]
         ]
     return style_df
 
 # ---------------------------------------------------------
-# INTERACTIVE USER INTERFACE FILTERS PANEL
+# INTERACTIVE FILTERS SIDEBAR
 # ---------------------------------------------------------
 st.markdown("### 🔍 Price Boundaries Filter")
-min_price = st.number_input("Minimum Asset Close Gate Price", value=40.0, key="intraday_min_price")
-max_price = st.number_input("Maximum Asset Close Gate Price", value=110.0, key="intraday_max_price")
+min_price = st.number_input("Minimum Asset Close Gate Price ($)", value=40.0, min_value=40.0, max_value=110.0, key="intraday_min_price")
+max_price = st.number_input("Maximum Asset Close Gate Price ($)", value=110.0, min_value=40.0, max_value=110.0, key="intraday_max_price")
 
-st.markdown("### 🎛️ Anomaly Multi-Factor Filters")
-pca_filter = st.slider("Minimum PCA1 Vector Strength (Institutional Filter)", min_value=-5.0, max_value=5.0, value=0.0, step=0.1)
-
+st.markdown("### 🎛️ Structural Execution Filters")
 execution_filter = st.multiselect(
-    "Filter by Real-Time Structural Execution Status",
-    ["Watch List", "Not Watch List", "Crossing Soon", "Setup Only"],
-    default=["Crossing Soon"],
+    "Filter by Real-Time Structural Execution Status", 
+    ["Watch List", "Not Watch List", "Crossing Soon", "Setup Only"], 
+    default=["Watch List", "Crossing Soon"], 
     key="intraday_execution_filter"
 )
 
-# ---------------------------------------------------------
-# RESULT DISPLAY HELPER
-# ---------------------------------------------------------
-def render_results(filtered, ranking_len, regime, sp500_trend, nasdaq_trend):
-    st.metric(label="📊 Active Market Regime Identified", value=f"{regime} (SP500: {sp500_trend} | NASDAQ: {nasdaq_trend})")
-    st.markdown(f"Structural Tier-1 Premium Universe: {ranking_len} premium tokens verified.")
-
-    if filtered.empty:
+def render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend):
+    st.metric(label="📊 Active Market Regime Identified", value=f"{regime}", delta=f"S&P500: {sp500_trend} | NASDAQ: {nasdaq_trend}", delta_color="off")
+    st.markdown(f"**Structural Tier-1 Premium Universe:** {len(ranking)} premium tokens verified.")
+    if filtered is None or filtered.empty:
         st.info("No tickers matched your interactive filter constraints.")
     else:
         display_df = filtered.copy()
-        
-        # FIXED: Maps to the new updated utils/data_fetch.py exchange layout safely
-        display_df["Ticker"] = display_df["Ticker"].apply(lambda t: f"{t} ({get_universe_source(t)})")
-
-        if "High_Proximity" in display_df.columns:
-            display_df["High_Proximity"] = (display_df["High_Proximity"] * 100).round(2)
-
-        if "BidAsk_Spread" in display_df.columns:
-            display_df["BidAsk_Spread"] = (display_df["BidAsk_Spread"] * 100).round(3)
-
+        if "Ticker" in display_df.columns and "Universe" in display_df.columns:
+            display_df["Ticker"] = display_df.apply(lambda r: f"{r['Ticker']} ({r['Universe']})", axis=1)
+            display_df = display_df.drop(columns=["Universe"], errors="ignore")
         st.subheader(f"🚀 Actionable Structural Matrix Results — {len(display_df)} Tickers")
         st.dataframe(display_df.style.apply(color_execution_column, axis=None), hide_index=True, use_container_width=True)
 
 # ---------------------------------------------------------
-# RUN MODEL MOTOR ENGINE — PARALLELIZED EXECUTION LOOP
+# RUN PART 3 ORCHESTRATION TRIGGER
 # ---------------------------------------------------------
 run_model = st.button("Run Intraday Model Scan", key="intraday_run_button")
 
 if run_model:
     try:
+        st.cache_data.clear()
         start_time = time.time()
         eastern = pytz.timezone("US/Eastern")
         now_est = datetime.now().astimezone(eastern)
-
+        
         st.markdown(f"⏱️ Scan Execution Time Stamp: **{now_est.strftime('%Y-%m-%d %H:%M:%S')} EST**")
-        progress_bar = st.progress(0, text="Loading baseline configuration maps...")
-
-        base_universe = load_universe()
-        if not base_universe:
-            st.error("The source stock universe list returned empty.")
-            st.stop()
-
-        progress_bar.progress(10, text=f"Scanning {len(base_universe)} tickers...")
-        ranking = cached_rank_universe(tuple(base_universe))
-
-        progress_bar.progress(40, text="Calculating index trend environment matrix...")
+        progress_bar = st.progress(0, text="Synchronizing clean global exchange batch maps...")
+        
+        batch_daily, batch_intra = fetch_clean_market_batch(tuple(load_universe()))
+        
+        progress_bar.progress(0.4, text="Running high-speed machine learning scoring array...")
+        ranking = local_rank_universe_batch(load_universe(), batch_daily, batch_intra, min_price, max_price)
+        
+        progress_bar.progress(0.7, text="Calculating index trend matrix...")
         sp500_trend = get_index_trend("^GSPC")
         nasdaq_trend = get_index_trend("^IXIC")
         regime = classify_regime(sp500_trend, nasdaq_trend)
-
-        progress_bar.progress(50, text="Processing High Proximity, Spreads, and SRC Candidates...")
-
-        prime_time = (now_est.hour == 10) or (now_est.hour == 11 and now_est.minute <= 30)
         
-        high_prox_dict = {}
-        spread_dict = {}
-        src_flags_dict = {}
-        
-        if ranking is not None and not ranking.empty:
-            ranking["SP500_Trend"] = sp500_trend
-            ranking["NASDAQ_Trend"] = nasdaq_trend
-            ranking["Market_Regime"] = regime
+        if not ranking.empty:
+            st.session_state["intraday_raw_ranking"] = ranking
+            st.session_state["intraday_regime"] = regime
+            st.session_state["intraday_sp500"] = sp500_trend
+            st.session_state["intraday_nasdaq"] = nasdaq_trend
             
-            def _process_single_ticker(args):
-                i, row, prime_time_flag, regime_flag = args
-                ticker = row["Ticker"]
-                current_price = to_scalar(row["Close"])
-
-                high_prox = compute_high_proximity(ticker)
-                spread = compute_bidask_spread(ticker)
-
-                src_flag = ""
-                if prime_time_flag:
-                    df_daily = warm_daily_backend(ticker)
-                    if df_daily is not None and not df_daily.empty and len(df_daily) >= 5:
-                        required_cols = {"Close", "High", "Low"}
-                        if required_cols.issubset(df_daily.columns):
-                            prev_close = to_scalar(df_daily["Close"].iloc[-2])
-                            drop_pct = compute_drop_pct(prev_close, current_price)
-                            recovery_prob = compute_recovery_probability(df_daily)
-                            ema_cross = ema9_cross_ema20_intraday(ticker)
-
-                            SRC = (drop_pct >= 0.03 and recovery_prob >= 0.60 and ema_cross and regime_flag in ["Bearish", "Choppy"])
-                            src_flag = "YES" if SRC else ""
-
-                return ticker, high_prox, spread, src_flag
-
-            tasks = [(i, row, prime_time, regime) for i, (_, row) in enumerate(ranking.iterrows())]
-            
-            completed = 0
-            total = len(tasks)
-            max_workers = 8  
-            
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(_process_single_ticker, task): task for task in tasks}
-                
-                for future in as_completed(futures):
-                    completed += 1
-                    try:
-                        ticker, high_prox, spread, src_flag = future.result()
-                        high_prox_dict[ticker] = high_prox
-                        spread_dict[ticker] = spread
-                        src_flags_dict[ticker] = src_flag
-                    except Exception:
-                        pass
-                    if completed % 30 == 0 or completed == total:
-                        progress_bar.progress(int(50 + (completed / total) * 45), text=f"Processing Execution Metrics ({completed}/{total})...")
-
-            # Map calculated arrays back into structural dataframe matching ticker targets
-            ranking["High_Proximity"] = ranking["Ticker"].map(high_prox_dict)
-            ranking["BidAsk_Spread"] = ranking["Ticker"].map(spread_dict)
-            ranking["SRC_Flag"] = ranking["Ticker"].map(src_flags_dict)
-
-        # ---------------------------------------------------------
-        # OPPORTUNITY SCORING ENGINE (VECTORIZED & FAIL-SAFE)
-        # ---------------------------------------------------------
-        # Comprehensive trend classification dictionary to prevent string matching drop-offs
-        trend_map = {
-            "down": 1, "downtrend": 1, "bearish": 1,
-            "flat": 2, "mixed": 2, "choppy": 2,
-            "up": 3, "uptrend": 3, "bullish": 3
-        }
-
-        # 1. Cleanse text vectors and standardize mapping keys
-        clean_trend = ranking["Trend"].astype(str).str.lower().str.strip().map(trend_map).fillna(1)
-
-        # 2. Force conversion to float numeric arrays to safeguard against thread pool type mutations
-        clean_score = pd.to_numeric(ranking["Score"], errors='coerce').fillna(0)
-        clean_prox  = pd.to_numeric(ranking["High_Proximity"], errors='coerce').fillna(0)
-        clean_spread = pd.to_numeric(ranking["BidAsk_Spread"], errors='coerce').fillna(1.0) # Assumes max friction on fail
-
-        # 3. Compute structural scoring components using ultra-fast NumPy vector blocks
-        trend_component  = clean_trend * 3
-        score_component  = np.where(clean_score < 2, 1, 2) * 2
-        prox_component   = np.where(clean_prox > 0.5, 1, 2) * 2
-        spread_component = np.where(clean_spread > 0.5, 1, 2) * 1
-
-        # 4. Synthesize factors into the final performance-tuned Opp_Score vector
-        ranking["Opp_Score"] = trend_component + score_component + prox_component + spread_component
-
-
-
-        # ---------------------------------------------------------
-        # APPLY INTERACTIVE DATAFRAME FILTERS
-        # ---------------------------------------------------------
-        progress_bar.progress(95, text="Applying user matrix structural filters...")
-        
-        filtered_df = ranking.copy() if (ranking is not None and not ranking.empty) else pd.DataFrame()
-        
-        if not filtered_df.empty:
-            # Price gate filter mapping
-            if "Close" in filtered_df.columns:
-                filtered_df["Close_Price"] = filtered_df["Close"].apply(to_scalar)
-                filtered_df = filtered_df[(filtered_df["Close_Price"] >= min_price) & (filtered_df["Close_Price"] <= max_price)]
-            
-            # PCA Strength Vector filter mapping
-            if "PCA1" in filtered_df.columns:
-                filtered_df = filtered_df[filtered_df["PCA1"] >= pca_filter]
-                
-            # Real-time execution gate matrix map
-            if "Execution" in filtered_df.columns and execution_filter:
-                filtered_df = filtered_df[filtered_df["Execution"].isin(execution_filter)]
-
-        progress_bar.progress(100, text="Scan complete!")
-        time.sleep(0.4)
         progress_bar.empty()
+        st.write(f"⏱ ... Market Core Sync Batch Execution Trace Complete.")
+        st.write(f"⚡ Total Model Runtime: {time.time() - start_time:.2f} seconds")
+    except Exception as e:
+        st.error(f"Model execution failed: {str(e)}")
 
-        # Render layout panel results out to user interface viewport
-        render_results(filtered_df, len(ranking) if ranking is not None else 0, regime, sp500_trend, nasdaq_trend)
-        st.success(f"⚡ Intraday scan finished in {(time.time() - start_time):.2f} seconds.")
-
-        # Save clean states to Session Memory
-        st.session_state["intraday_filtered_results"] = ranking
-        st.session_state["intraday_visual_results"] = filtered_df
-        st.session_state["intraday_regime"] = regime
-        st.session_state["intraday_sp500"] = sp500_trend
-        st.session_state["intraday_nasdaq"] = nasdaq_trend
-
-    except Exception as master_err:
-        st.error(f"ENGINE CRASH: An unexpected error occurred inside the execution controller loop: {master_err}")
+if "intraday_raw_ranking" in st.session_state:
+    ranking = st.session_state["intraday_raw_ranking"]
+    regime = st.session_state.get("intraday_regime", "Unknown")
+    sp500_trend = st.session_state.get("intraday_sp500", "Unknown")
+    nasdaq_trend = st.session_state.get("intraday_nasdaq", "Unknown")
+    
+    if not ranking.empty:
+        filtered = ranking.copy()
+        filtered = filtered[(filtered["Close"] >= min_price) & (filtered["Close"] <= max_price)]
+        if execution_filter and "Execution" in filtered.columns:
+            filtered = filtered[filtered["Execution"].isin(execution_filter)]
+        render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend)
