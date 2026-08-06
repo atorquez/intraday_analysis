@@ -99,9 +99,22 @@ Assets are assigned an **Execution Label** based on how their localized structur
 ### 4. Setup Only (Passive Background Layer)
 * Assets that pass the basic exchange filter gates but do not satisfy either the "Crossing Soon" compression band or active "Watch List" slope trajectories.
 
+## 5. Advanced Visual Price-Action Guards (The Shield Protocols)
+
+To completely protect trading capital from false breakout traps, morning fades, and sudden trend collapse structures (e.g., historical cases like SR), the engine programmatically emulates professional manual chart checks. If a ticker violates any single parameter below, it is purged from memory before it can touch the active leaderboard.
+
+### 🛡️ Guard 1: Open-Drive Symmetry (Intraday Bullish Structural Health)
+* **The Manual Logic:** Checking that today's candlestick profile is green and holding structural strength from the opening bell.
+* **The Vector Filter:** `current_price >= session_open_price`
+* **Trading Impact:** Instantly drops assets that break out early but fill down red below their open. This blocks high-risk intraday distribution spikes.
+
+🛡️ Guard 2: Multi-Day Resistance Shield (Clear Room to Run)The Manual Logic: Visually scanning the daily chart back 5 sessions to guarantee price isn't smashing straight into a wall of resting sell orders.The Vector Filter: current_price > max_5day_overhead_resistanceTrading Impact: Confirms the ticker has crossed over the highest wicks of the trailing calendar week. It prevents entry into overhead distribution ceilings.
+
+🛡️ Guard 3: The 10:30 AM Breakout Retest Gate (Sustained Momentum Hold)The Manual Logic: Verifying that after the initial 30 minutes of opening chaos settles, the asset holds above its early morning resistance marker.The Vector Filter: if current_bars > 45: current_price > morning_high_930_1000Trading Impact: Selects only the setups where institutions actively absorb afternoon pullbacks. If an asset spikes at 09:45 AM but slips deep back into yesterday's range later in the session, this gate drops it from the terminal radar.
+
 ---
 
-## 5. Statistical Frequency Math Behind `recovery_prob`
+## 6. Statistical Frequency Math Behind `recovery_prob`
 
 The `recovery_prob` metric is a pure historical frequency estimator that acts as a behavioral tracking tool for individual tickers. It calculates the statistical frequency that an asset will reverse major intraday sell-offs based on its daily candles over a trailing **60-day window**.
 
@@ -118,7 +131,7 @@ For each session in the historical window, the engine runs this exact calculatio
 ### Example Validation Baseline:
 Out of 60 trading days scanned, a stock flushes intraday but reclaims over 50% of its range by the closing bell on 38 of those days:$$\text{Recovery_Probability} = \frac{38}{60} = 0.6333 \longrightarrow \mathbf{63.33%}$$This confirms the ticker has a reliable behavioral habit of reversing dips, validating it as a safe structural candidate for morning capitulation trading operations.
 
-6. The Predictive Low-Lag Scoring Engine
+7. The Predictive Low-Lag Scoring Engine
 
 To neutralize the 2-to-3 minute delay factor associated with opening chart layouts manually on E*TRADE, the system utilizes an Un-Clipped, Real-Time Scoring Formula.
 
@@ -131,7 +144,7 @@ Score Priority Framework:
 🐢 The Lagging Extension Core (Scores 5.0 to 8.4): Assets with solid historical trends (Watch List) that are currently extended away from their moving averages or lack immediate intraday volume support.
 ⚠️ The Penetration Penalty (Scores < 5.0): Inactive or bleeding assets. Pullbacks and negative slope angles drag down the overall ranking, pushing zombie stocks off the front page.
 
-7. High-Speed Vectorized Funnel Processing ArchitectureTo bypass individual network connection overhead and eliminate Yahoo Finance API rate limiting blocks (HTTP 429), Page 1 uses a single-pass vectorized data ingestion layer:
+8. High-Speed Vectorized Funnel Processing ArchitectureTo bypass individual network connection overhead and eliminate Yahoo Finance API rate limiting blocks (HTTP 429), Page 1 uses a single-pass vectorized data ingestion layer:
 
                   [ load_universe() Ticker SANDBOX Pool ]
                                      │
@@ -151,6 +164,36 @@ Score Priority Framework:
                                      │
                                      ▼  
                  STAGE 4: Vectorized Indicators Math
+    Calculates moving averages, ATR%, RVOL, and un-clipped Scores in RAM
+                                     │
+                                     ▼  
+              [ Final Output: Elite Low-Lag Trading Table ]
+
+
+8. High-Speed Vectorized Funnel Processing ArchitectureTo bypass individual network connection overhead and eliminate Yahoo Finance API rate limiting blocks (HTTP 429), Page 1 uses a single-pass vectorized data ingestion layer:
+
+                  [ load_universe() Ticker SANDBOX Pool ]
+                                     │
+                                     ▼  
+              STAGE 1: Vectorized Batch Download Layer
+     yf.download() executes 2 unified hits for all assets simultaneously
+              (1 Contract for Daily, 1 Contract for 1-Min)
+                                     │
+                                     ▼  
+                 STAGE 2: RAM Column Unpivoting Layer
+      Swaps levels en masse so Ticker symbols occupy Level 0
+        Bypasses expensive pandas cross-section loops (.xs)
+                                     │
+                                     ▼  
+                 STAGE 3: Core Capacity Funnel Gate
+     Drops assets with Avg_Volume_20d < 250k or Close Price outside $40-$110
+                                     │
+                                     ▼  
+              STAGE 4: Hardened Visual Checklist Protections
+      Filters out files trading below Open, under 5-day Highs, or below early highs
+                                     │
+                                     ▼  
+                 STAGE 5: Vectorized Indicators Math
     Calculates moving averages, ATR%, RVOL, and un-clipped Scores in RAM
                                      │
                                      ▼  

@@ -108,7 +108,7 @@ def compute_recovery_probability(df_daily):
     return float(recoveries / total)
 
 # ---------------------------------------------------------
-# MASTER VECTORIZED EXTRACTION INTERFACE (INSTITUTIONAL GATES HARDENED)
+# MASTER VECTORIZED EXTRACTION INTERFACE (VISUAL CHECKLIST AUTOMATED)
 # ---------------------------------------------------------
 def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_price):
     rows = []
@@ -138,6 +138,7 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 continue
 
             # Isolate Intraday Arrays early for Institutional Safety Protection Gates
+            open_intra = intraday_df["Open"].values
             close_intra = intraday_df["Close"].values
             high_intra = intraday_df["High"].values
             low_intra = intraday_df["Low"].values
@@ -147,6 +148,15 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 continue
                 
             current_intraday_price = float(close_intra[-1])
+            session_open_price = float(open_intra[0])
+
+            # ----------------------------------------------------------------------
+            # 🚨 HARDENED FILTER: CRITERION 3 — THE OPEN-DRIVE SYMMETRY GATE
+            # ----------------------------------------------------------------------
+            # Instantly drop assets if they are trading BELOW today's opening print.
+            # This completely blocks failing setups and fading red candlesticks.
+            if current_intraday_price < session_open_price:
+                continue
 
             # ----------------------------------------------------------------------
             # 🚨 GATE 1: THE INSTITUTIONAL SPREAD GATE (Eliminates Thin Order Books)
@@ -169,7 +179,7 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 continue
 
             # ----------------------------------------------------------------------
-            # 🚨 GATE 3: THE VWAP SUSTAINABILITY CHECKER (Protects Against Chasing Overextended Peaks)
+            # 🚨 GATE 3: THE VWAP SUSTAINABILITY CHECKER (Protects Against Overextension)
             # ----------------------------------------------------------------------
             cv_slice = vol_intra * close_intra
             vwap_spot = cv_slice.sum() / vol_intra.sum() if vol_intra.sum() > 0 else current_intraday_price
@@ -183,6 +193,28 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             close_d = daily_df["Close"].values
             high_d = daily_df["High"].values
             low_d = daily_df["Low"].values
+
+            # ----------------------------------------------------------------------
+            # 🚨 HARDENED FILTER: CRITERION 1 — THE MULTI-DAY RESISTANCE SHIELD
+            # ----------------------------------------------------------------------
+            # Find the absolute highest wick print achieved over the last 5 daily sessions
+            # Excluding today's active live daily candlestick row (iloc[-1])
+            max_5day_overhead_resistance = float(high_d[-6:-1].max()) if len(high_d) >= 6 else float(high_d[0])
+            
+            # If the asset is trading below the last 5 days' highs, it doesn't have "Room to Run".
+            if current_intraday_price < max_5day_overhead_resistance:
+                continue
+
+            # ----------------------------------------------------------------------
+            # 🚨 HARDENED FILTER: CRITERION 4 — THE 10:30 AM INTRADAY RETEST GATE
+            # ----------------------------------------------------------------------
+            # Extract the high established during the first 30 minutes (09:30 - 10:00 AM)
+            morning_high_marker = float(high_intra[:30].max()) if len(high_intra) >= 30 else session_open_price
+            
+            # If we are past 10:15 AM and the current price has dropped below the early high,
+            # the breakout is failing to sustain momentum. Discard it.
+            if len(high_intra) > 45 and current_intraday_price < morning_high_marker:
+                continue
 
             ema9_d = daily_df["Close"].ewm(span=9).mean().values
             ema20_d = daily_df["Close"].ewm(span=20).mean().values

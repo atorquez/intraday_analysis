@@ -1,0 +1,25 @@
+# ==============================================================================
+# 🛡️ SPC ARCHITECTURE GLOBAL GITIGNORE FILTER
+# ==============================================================================
+
+# 1. Local Python Virtual Environments (Completely Blocks Re-Tracking)
+spc_env312/
+.venv/
+venv/
+env/
+ENV/
+
+# 2. Python Compiled Bytecode & Memory Caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.pypy/
+
+# 3. Streamlit Operational Caches
+.streamlit/config.toml (if you have local private credentials)
+
+# 4. OS System Overhead Files
+.DS_Store
+Thumbs.db
