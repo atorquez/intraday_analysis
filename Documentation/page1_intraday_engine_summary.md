@@ -199,5 +199,116 @@ Score Priority Framework:
                                      ▼  
               [ Final Output: Elite Low-Lag Trading Table ]
 
+
+## 9. Trade Execution Process Detail
+
+1. The Multi-Day Structure Checklist (The Daily Chart)
+
+Before looking at today’s action, professional traders analyze the immediate historical boundaries to ensure they aren't buying directly into a brick wall of resistance.
+
+                  [ DAILY CHART VISUAL INSPECTION ]
+                                  │
+      ┌───────────────────────────┴───────────────────────────┐
+      ▼                                                       ▼
+CRITERION 1: Clear Room to Run              CRITERION 2: The Multi-Day Base
+Is price clear of the last 5 days' highs?    Has the asset consolidated for 3-5 days?
+
+🛡️Criterion 1: "Room to Run" (Immediate Resistance Check)
+The Visual: Look back at the daily candlesticks for the last 5 to 10 sessions.
+
+The Rule: Ensure the current intraday price is breaking above the highest wick of those previous days. If the current price is right under a previous daily high, do not enter. Institutional supply sits there, and the stock is highly likely to hit that level and reverse.
+
+🛡️Criterion 2: The Multi-Day Base (Catalyst Check)
+The Visual: Look for a horizontal cluster of daily candles moving sideways in a tight, narrow channel over the last 3 to 5 days.
+
+The Rule: A sustainable breakout requires a base. If a stock has already surged green for 3 days straight without pausing, today's intraday breakout is exhausted. You want to buy the first expansion day out of a multi-day tight consolidation base.
+
+2. Today's Valuation Checklist (The Intraday Anchor)
+
+Once the daily chart is cleared, a trader evaluates today’s opening footprint to confirm the asset is experiencing controlled accumulation rather than erratic retail chasing.
+
+                 [ INTRADAY CHART VISUAL INSPECTION ]
+                                  │
+      ┌───────────────────────────┴───────────────────────────┐
+      ▼                                                       ▼
+CRITERION 3: Open-Drive Symmetry            CRITERION 4: The 10:30 AM Retest
+Did the asset open near its low?            Does price hold above the morning high?
+
+🛡️Criterion 3: Open-Drive Symmetry (Price vs. Open)
+
+The Visual: Check where today's absolute Low is relative to today's Open price.
+
+The Rule: The ideal bullish intraday setup opens, dips down just a fraction (less than 0.2%), and immediately drives upward. If today's low is far below the open (meaning it flushed hard off the open before recovering), it indicates highly erratic, emotional retail supply. You want clean "Open-Drive" setups where buyers took control from the opening print.
+
+🛡️Criterion 4: The 10:30 AM Pullback Retest (Sustained Hold)
+
+The Visual: Look at the high print established during the first 15–30 minutes of the morning session (09:30–10:00 AM).The Rule: Never buy the initial breakout candle blindly. Wait for the stock to experience its first inevitable pullback (usually between 10:00 AM and 10:30 AM). If the stock pulls back but holds strictly above that early morning high line, it proves institutions are actively absorbing the selling pressure to defend the move. This retest is your optimal, low-risk entry point.
+
+
+
+3. The Institutional Tape Checklist (E*TRADE Order Book)
+
+Professional traders monitor the raw momentum of the current candle to separate sustainable institutional block buying from weak retail chasing
+
+                    [ LIVE ORDER BOOK INSPECTION ]
+                                  │
+      ┌───────────────────────────┴───────────────────────────┐
+      ▼                                                       ▼
+CRITERION 5: Thick Ask Clearing              CRITERION 6: The 3-Bar Volume Steps
+Are heavy block orders being absorbed?      Are volume bars stepping up consecutively?
+
+🛡️Criterion 5: Thick Ask Clearing (Level 2 Book)
+
+The Visual: Open your E*TRADE Level 2 order book and look at the sizes resting on the Ask side.
+
+The Rule: Counter-intuitively, you want to see large sell orders stacked closely together on the Ask. If the Ask side is completely thin and empty, it takes very little buying power to warp the price higher, creating a fake breakout. When you see large institutional blocks sitting on the Ask and the live tape shows buyers aggressively chewing right through those thick walls, it confirms authentic, institutional demand.
+
+🛡️Criterion 6: The 3-Bar Volume EscalationThe Visual: Look at your 1-minute volume histogram bars at the bottom of the intraday chart.The Rule: Avoid entry if the breakout is driven by a single, solitary giant volume spike (this is often a block trade print cross or an exhaustion climax). A sustainable move exhibits consecutive ascending stair-steps across 3 or more 1-minute volume bars. This visual pattern proves new buyers are continuously entering the arena to sustain the price appreciation
+
+## 10. Manual Charts
+For professional momentum traders using manual charts (like your E*TRADE setup) alongside a real-time scanner, the absolute best practice is to use a Dual-Timeframe Display Layout:
+
+Chart 1 (The Tactical Executive): 1-Minute Interval | 1-Day View
+
+Chart 2 (The Compass Matrix): 5-Minute Interval | 3-Day ViewHere is exactly how these two lookups interact with your rules to eliminate false signals and give you a low-risk entry
+
+🗺️ Chart 2: The 5-Minute Chart (3-Day View) — The Compass Matrix
+
+You open this chart first to confirm the stock has an authentic macro structural engine. It acts as a bridge between the Daily chart and the immediate 1-Minute entry.
+
+How it applies to your rules:
+
+Criterion 1 (Room to Run): A 3-day view on a 5-minute chart perfectly exposes the exact intraday high wicks from yesterday and two days ago. You can see instantly if today's price is genuinely breaking out into "clear air" or if it is running straight into a wall of resting sell orders from yesterday's session.
+
+Criterion 2 (The Multi-Day Base): It shows you if the stock has been consolidating sideways over the last 48–72 hours or if it is already vertically exhausted.
+
+The Blueprint: If the 5-minute chart shows the price breaking out above yesterday's high wick after a long sideways consolidation, the macro compass is Green.
+
+
+🎯 Chart 1: The 1-Minute Chart (1-Day View) — The Tactical Executive
+
+Once the 5-minute chart grants a macro green light, you switch your eyes exclusively to today's 1-minute chart to hunt for your precise execution trigger.
+
+How it applies to your rules:
+
+Criterion 3 (Open-Drive Symmetry): You can look at the very first few candles of the morning (09:30–09:35 AM) to confirm the stock opened, held near its low, and drove aggressively upward.
+
+Criterion 4 (The 10:30 AM Retest): This is where you draw your horizontal support line right at the peak of the 09:30–10:00 AM morning high. You watch the 1-minute candles pull back toward that line between 10:00 AM and 10:30 AM.
+
+The Blueprint: You trigger your buy order on E*TRADE when a 1-minute candle bounces off that morning high line, accompanied by Criterion 6 (Ascending 3-Bar Volume stair-steps).
+
+💻 Recommended Workspace Screen LayoutTo make your 2-to-3 minute lookup loop as fast as possible, arrange your E*TRADE terminal monitor layout using a Split-Window view:
+
+┌───────────────────────────────────────┬───────────────────────────────────────┐
+│              CHART 1                  │              CHART 2                  │
+│       1-Minute / 1-Day View           │       5-Minute / 3-Day View           │
+│                                       │                                       │
+│   - Tracks the 10:30 AM Retest Line   │   - Verifies Yesterday's High Wicks   │
+│   - Monitors 3-Bar Volume Steps       │   - Confirms Multi-Day Baseline Coils │
+│   - Confirms Open-Drive Symmetry      │   - Screens out Overhead Supply Walls │
+└───────────────────────────────────────┴───────────────────────────────────────┘
+
+By keeping these two exact views open side-by-side for your candidates, you instantly see the macro strength (5-min) and the microscopic execution trigger (1-min) simultaneously, completely neutralizing the market delay factor.
+
 ✔️ End of Page 1 Technical Documentation Document
 

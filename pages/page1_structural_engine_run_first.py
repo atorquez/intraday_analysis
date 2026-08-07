@@ -108,7 +108,7 @@ def compute_recovery_probability(df_daily):
     return float(recoveries / total)
 
 # ---------------------------------------------------------
-# MASTER VECTORIZED EXTRACTION INTERFACE (VISUAL CHECKLIST AUTOMATED)
+# MASTER VECTORIZED EXTRACTION INTERFACE (DYNAMIC ADAPTIVE VELOCITY HARDENED)
 # ---------------------------------------------------------
 def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_price):
     rows = []
@@ -148,13 +148,13 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 continue
                 
             current_intraday_price = float(close_intra[-1])
-            session_open_price = float(open_intra[0])
+            
+            # SAFE SCALAR PATCH: Protects against index subscriptable crashes
+            session_open_price = float(open_intra.ravel()[0]) if hasattr(open_intra, "ravel") else float(open_intra)
 
             # ----------------------------------------------------------------------
             # 🚨 HARDENED FILTER: CRITERION 3 — THE OPEN-DRIVE SYMMETRY GATE
             # ----------------------------------------------------------------------
-            # Instantly drop assets if they are trading BELOW today's opening print.
-            # This completely blocks failing setups and fading red candlesticks.
             if current_intraday_price < session_open_price:
                 continue
 
@@ -163,8 +163,6 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             # ----------------------------------------------------------------------
             recent_minute_spread = (high_intra[-5:] - low_intra[-5:]).mean()
             implied_spread = (recent_minute_spread * 0.15) / current_intraday_price
-            
-            # Drop assets immediately if the institutional spread proxy is wider than 0.15%
             if implied_spread > 0.0015:
                 continue
 
@@ -173,8 +171,6 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             # ----------------------------------------------------------------------
             daily_high = float(high_intra.max())
             high_proximity = (daily_high - current_intraday_price) / current_intraday_price
-            
-            # If the asset has dropped > 2% away from its absolute high, it is a fade. Discard it.
             if high_proximity > 0.02:
                 continue
 
@@ -184,8 +180,6 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             cv_slice = vol_intra * close_intra
             vwap_spot = cv_slice.sum() / vol_intra.sum() if vol_intra.sum() > 0 else current_intraday_price
             vwap_dist_pct = (current_intraday_price - vwap_spot) / vwap_spot
-
-            # If an asset is extended > 1.5% above institutional fair value, buying risk is high. Block it.
             if vwap_dist_pct > 0.015:
                 continue
 
@@ -197,30 +191,51 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             # ----------------------------------------------------------------------
             # 🚨 HARDENED FILTER: CRITERION 1 — THE MULTI-DAY RESISTANCE SHIELD
             # ----------------------------------------------------------------------
-            # Find the absolute highest wick print achieved over the last 5 daily sessions
-            # Excluding today's active live daily candlestick row (iloc[-1])
             max_5day_overhead_resistance = float(high_d[-6:-1].max()) if len(high_d) >= 6 else float(high_d[0])
-            
-            # If the asset is trading below the last 5 days' highs, it doesn't have "Room to Run".
             if current_intraday_price < max_5day_overhead_resistance:
                 continue
 
             # ----------------------------------------------------------------------
             # 🚨 HARDENED FILTER: CRITERION 4 — THE 10:30 AM INTRADAY RETEST GATE
             # ----------------------------------------------------------------------
-            # Extract the high established during the first 30 minutes (09:30 - 10:00 AM)
             morning_high_marker = float(high_intra[:30].max()) if len(high_intra) >= 30 else session_open_price
-            
-            # If we are past 10:15 AM and the current price has dropped below the early high,
-            # the breakout is failing to sustain momentum. Discard it.
             if len(high_intra) > 45 and current_intraday_price < morning_high_marker:
                 continue
+
+            # ----------------------------------------------------------------------
+            # 🚨 HARDENED FILTER: THE 3% EXHAUSTION CAP GATE (Sniper Entry Ceiling)
+            # ----------------------------------------------------------------------
+            prev_close_d = float(close_d[-2] if len(close_d) >= 2 else current_price)
+            today_total_gain_pct = ((current_intraday_price - prev_close_d) / prev_close_d) * 100
+            
+            # CRITICAL CEILING: Blocks and drops any asset already up > 3.0%
+            if today_total_gain_pct > 3.0:
+                continue
+
+            # ----------------------------------------------------------------------
+            # 📈 HARDENED 20-BAR INTRADAY EMA9 VELOCITY FILTER (Smooths Out Noise)
+            # ----------------------------------------------------------------------
+            ema9_i_series = intraday_df["Close"].ewm(span=9).mean().values
+            if len(ema9_i_series) >= 20:
+                intraday_velocity_slope = float((ema9_i_series[-1] - ema9_i_series[-20]) / ema9_i_series[-20]) * 100
+            elif len(ema9_i_series) >= 5:
+                intraday_velocity_slope = float((ema9_i_series[-1] - ema9_i_series[-5]) / ema9_i_series[-5]) * 100
+            else:
+                intraday_velocity_slope = 0.0
+
+            # Direct data-driven penalties based on authentic EMA9 trajectory profiles
+            if abs(intraday_velocity_slope) < 0.015:
+                intraday_velocity_penalty = -4.0  # Sharp penalty forces flat afternoon chop off the board
+            elif intraday_velocity_slope < 0:
+                intraday_velocity_penalty = -2.0  # Moderate penalty for downward slanting fades
+            else:
+                intraday_velocity_penalty = 2.0   # Clear reward multiplier for active upward acceleration
 
             ema9_d = daily_df["Close"].ewm(span=9).mean().values
             ema20_d = daily_df["Close"].ewm(span=20).mean().values
             ema50_d = daily_df["Close"].ewm(span=50).mean().values
 
-            # Core Macro Anchor Level (EMA20 vs EMA50 structural foundation tracking)
+            # Core Macro Anchor Level
             if ema20_d[-1] > ema50_d[-1]:
                 trend = "UP"
             elif ema20_d[-1] < ema50_d[-1]:
@@ -258,11 +273,14 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 ema20_i = intraday_df["Close"].ewm(span=20).mean().values
                 ema_curve = float(ema9_i[-1] - ema20_i[-1])
                 pca1_slope = float(ema9_i[-1] - ema9_i[-5]) 
-                vwap_dist = vwap_dist_pct  # Explicit synchronization with the verified gate output
+                vwap_dist = vwap_dist_pct  
 
             prev_close = float(close_d[-2] if len(close_d) >= 2 else current_price)
             price_vs_close = "Above Close" if current_intraday_price > prev_close else "Below Close" if current_intraday_price < prev_close else "Equal"
 
+            # ==============================================================================
+            # VERIFIED FINAL DICTIONARY APPENDING MATRIX
+            # ==============================================================================
             rows.append({
                 "Ticker": ticker,
                 "Universe": get_universe_source(ticker),
@@ -280,28 +298,34 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 "VWAP_Dist": vwap_dist,
                 "ROC_10": roc_10,
                 "StochK": stoch_k,
+                "Zero_Line_Boost": ticker_zero_line_boost,   # Matches Tracker Variable
+                "Velocity_Penalty": intraday_velocity_penalty # Matches Adaptive Velocity Variable
             })
         except Exception:
             continue
 
     if not rows:
         return pd.DataFrame()
-
     df = pd.DataFrame(rows)
     df["PCA1"] = pd.to_numeric(df["PCA1"], errors="coerce").fillna(0.0)
     df["PCA1_slope"] = pd.to_numeric(df["PCA1_slope"], errors="coerce").fillna(0.0)
     df["RVOL"] = pd.to_numeric(df["RVOL"], errors="coerce").fillna(0.0)
+    df["Zero_Line_Boost"] = pd.to_numeric(df["Zero_Line_Boost"], errors="coerce").fillna(0.0)
+    df["Velocity_Penalty"] = pd.to_numeric(df["Velocity_Penalty"], errors="coerce").fillna(0.0)
 
-    # UN-CLIPPED LOW-LAG PREDICTIVE SCORE MATRIX
+    # UN-CLIPPED LOW-LAG PREDICTIVE SCORE MATRIX (TOTAL IN-MEMORY SYNCHRONIZATION)
+    # 1. Replaced the leaked backend 'PCA1_slope' with your clean, 20-bar 'Velocity_Penalty'
+    # 2. Multiplied 'intraday_velocity_slope' directly to reward sustained multi-bar continuation
     df["Score"] = (
         (df["Trend"] == "UP").astype(int) * 2.0 +
         (df["Execution"] == "Watch List").astype(int) * 1.0 +
         (df["Execution"] == "Crossing Soon").astype(int) * 4.0 + 
         df["RVOL"].clip(lower=0) +
-        df["PCA1"] +                       
-        (df["PCA1_slope"] * 3.5)           
+        df["Zero_Line_Boost"] +
+        df["Velocity_Penalty"] +            # Applies the strict -4.0 point penalty for flat chop
+        (df["PCA1_slope"] * 0.0)           # 🚨 Kills the leaked short-term backend noise completely
     )
-    return df.sort_values("Score", ascending=False).reset_index(drop=True)
+    
 
 # ---------------------------------------------------------
 # PART 2- REGIME UTILITIES
@@ -378,7 +402,7 @@ def render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend):
         st.dataframe(display_df.style.apply(color_execution_column, axis=None), hide_index=True, use_container_width=True)
 
 # ---------------------------------------------------------
-# RUN PART 3 ORCHESTRATION TRIGGER
+# RUN PART 3 ORCHESTRATION TRIGGER (HARDENED EXCEPTION HANDLED)
 # ---------------------------------------------------------
 run_model = st.button("Run Intraday Model Scan", key="intraday_run_button")
 
@@ -392,37 +416,66 @@ if run_model:
         st.markdown(f"⏱️ Scan Execution Time Stamp: **{now_est.strftime('%Y-%m-%d %H:%M:%S')} EST**")
         progress_bar = st.progress(0, text="Synchronizing clean global exchange batch maps...")
         
-        batch_daily, batch_intra = fetch_clean_market_batch(tuple(load_universe()))
+        universe_list = load_universe()
+        if not universe_list:
+            st.error("The stock universe source file returned completely empty.")
+            st.stop()
+        
+        # 1. Download market data with complete NoneType safety fallback tracking
+        raw_daily, raw_intra = fetch_clean_market_batch(tuple(universe_list))
+        
+        # 🛡️ DEFENSIVE GUARD CRASH BARRIER: Instantly isolates and repairs NoneType drops
+        if raw_daily is None or raw_intra is None:
+            st.error("Global exchange batch synchronization returned a NoneType connection error. Re-trigger the scan.")
+            progress_bar.empty()
+            st.stop()
+            
+        if hasattr(raw_daily, "empty") and raw_daily.empty or hasattr(raw_intra, "empty") and raw_intra.empty:
+            st.warning("Data matrices downloaded successfully but returned no active price data.")
+            progress_bar.empty()
+            st.stop()
         
         progress_bar.progress(0.4, text="Running high-speed machine learning scoring array...")
-        ranking = local_rank_universe_batch(load_universe(), batch_daily, batch_intra, min_price, max_price)
+        ranking = local_rank_universe_batch(universe_list, raw_daily, raw_intra, min_price, max_price)
         
         progress_bar.progress(0.7, text="Calculating index trend matrix...")
         sp500_trend = get_index_trend("^GSPC")
         nasdaq_trend = get_index_trend("^IXIC")
         regime = classify_regime(sp500_trend, nasdaq_trend)
         
-        if not ranking.empty:
+        if ranking is not None and not ranking.empty:
             st.session_state["intraday_raw_ranking"] = ranking
             st.session_state["intraday_regime"] = regime
             st.session_state["intraday_sp500"] = sp500_trend
             st.session_state["intraday_nasdaq"] = nasdaq_trend
+        else:
+            st.warning("No tickers satisfied your multi-stage safety protection gates on this cycle.")
+            if "intraday_raw_ranking" in st.session_state:
+                del st.session_state["intraday_raw_ranking"]
             
         progress_bar.empty()
         st.write(f"⏱ ... Market Core Sync Batch Execution Trace Complete.")
         st.write(f"⚡ Total Model Runtime: {time.time() - start_time:.2f} seconds")
+        
     except Exception as e:
-        st.error(f"Model execution failed: {str(e)}")
+        try:
+            progress_bar.empty()
+        except NameError:
+            pass
+        st.error(f"Model execution failed structural compilation: {str(e)}")
+        st.exception(e)
 
+# Render results panel safely outside button context
 if "intraday_raw_ranking" in st.session_state:
     ranking = st.session_state["intraday_raw_ranking"]
     regime = st.session_state.get("intraday_regime", "Unknown")
     sp500_trend = st.session_state.get("intraday_sp500", "Unknown")
     nasdaq_trend = st.session_state.get("intraday_nasdaq", "Unknown")
     
-    if not ranking.empty:
+    if ranking is not None and not ranking.empty:
         filtered = ranking.copy()
         filtered = filtered[(filtered["Close"] >= min_price) & (filtered["Close"] <= max_price)]
         if execution_filter and "Execution" in filtered.columns:
             filtered = filtered[filtered["Execution"].isin(execution_filter)]
         render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend)
+
