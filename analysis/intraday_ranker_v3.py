@@ -17,12 +17,6 @@ logging.basicConfig(level=logging.CRITICAL)
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
-# Direct terminal override to shut down internal library printing streams
-import os
-import sys
-if not sys.stdout.isatty():
-    yf.set_tz_cache(False)
-
 print(">>> intraday_ranker_v3 PERFORMANCE ENGINES LOADED <<<")
 
 # ---------------------------------------------------------
