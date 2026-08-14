@@ -110,6 +110,9 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
             prev_close_d = float(close_d[-2] if len(close_d) >= 2 else current_price)
             yesterday_high = float(high_d[-2] if len(high_d) >= 2 else high_d[-1])
 
+            # NEW COLUMN: Current price vs yesterday close
+            current_vs_close_pct = ((current_intraday_price - prev_close_d) / prev_close_d) * 100
+
             # ---------------------------------------------------------
             # A. GAP MAGNITUDE
             # ---------------------------------------------------------
@@ -244,6 +247,7 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 "Ticker": ticker,
                 "Close": round(current_price, 2),
                 "Gap%": round(gap_pct, 2),
+                "Current_vs_Close%": round(current_vs_close_pct, 2),
                 "RVOL": round(rvol, 2),
                 "EMA9_Slope_10": round(ema9_slope_10, 3),
                 "Intraday_Range%": round(intraday_range_pct, 2),
