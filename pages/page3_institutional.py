@@ -286,13 +286,14 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
 
             rows.append({
                 "Ticker": ticker,
+                "Trend": trend,
                 "Universe": get_universe_source(ticker),
-                "Close": round(current_price, 2),
-                "ATR%": round(atr_pct, 2),
+                "Execution": execution,"Close": round(current_price, 2),
+                "Trend": trend,"ATR%": round(atr_pct, 2),
                 "RVOL": round(rvol, 2),
                 "Gap%": round(gap_pct, 2),
-                "Trend": trend,
-                "Execution": execution,
+                #"Trend": trend,
+                #"Execution": execution,
                 "PCA1": 0.0,
                 "Avg_Volume_20d": avg_volume_20d,
                 "Price_vs_Close": price_vs_close,
