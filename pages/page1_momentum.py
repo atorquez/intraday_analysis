@@ -1,22 +1,22 @@
 # ==============================================================================
-# 🚀 MOMENTUM ENGINE PAGE 8 — FIRST 15-MINUTE OPTIMIZED MODEL
+# 🚀 MOMENTUM ENGINE — FIRST 15-MINUTE OPTIMIZED MODEL + TOP5 TRACKER
 # ==============================================================================
 import streamlit as st
 
-st.set_page_config(layout="wide", page_title="Momentum Engine Page8")
+st.set_page_config(layout="wide", page_title="Momentum Engine")
 st.caption("Version: 2026-08-01")
-st.title("🚀 Momentum Engine Page 8 — Aggressive Early-Session Scanner")
+st.title("🚀 Momentum Engine — Aggressive Early-Session Scanner")
 
 import importlib
 import time
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, date
 import pytz
 
 # ---------------------------------------------------------
-# SHARED UTILITIES (REUSED FROM PAGE 1 BACKBONE)
+# SHARED UTILITIES
 # ---------------------------------------------------------
 def _flatten_columns(df):
     if df is None or df.empty:
@@ -62,7 +62,7 @@ def to_scalar(x):
             return float("nan")
 
 # ---------------------------------------------------------
-# PAGE 8 — PURE MOMENTUM SCORING ENGINE + FIRST 15-MINUTE MODE
+# MOMENTUM ENGINE + TREND
 # ---------------------------------------------------------
 def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_price, first_15_mode):
     rows = []
@@ -110,7 +110,6 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
             prev_close_d = float(close_d[-2] if len(close_d) >= 2 else current_price)
             yesterday_high = float(high_d[-2] if len(high_d) >= 2 else high_d[-1])
 
-            # NEW COLUMN: Current price vs yesterday close
             current_vs_close_pct = ((current_intraday_price - prev_close_d) / prev_close_d) * 100
 
             # ---------------------------------------------------------
@@ -129,7 +128,7 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 gap_score = 0.0
 
             # ---------------------------------------------------------
-            # B. FIRST-HOUR VELOCITY (10-BAR EMA9 SLOPE)
+            # B. FIRST-HOUR VELOCITY (EMA9 SLOPE)
             # ---------------------------------------------------------
             ema9_i_series = intraday_df["Close"].ewm(span=9).mean().values
             if len(ema9_i_series) >= 10:
@@ -195,7 +194,7 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 volatility_score = 0.0
 
             # ---------------------------------------------------------
-            # F. EMA STACK
+            # F. EMA STACK (DAILY)
             # ---------------------------------------------------------
             ema9_d = daily_df["Close"].ewm(span=9).mean().values
             ema20_d = daily_df["Close"].ewm(span=20).mean().values
@@ -218,7 +217,21 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 vwap_reclaim_score = 0.0
 
             # ---------------------------------------------------------
-            # ⭐ FIRST 15-MINUTE MODE MULTIPLIERS
+            # ⭐ TREND (INTRADAY EMA STACK)
+            # ---------------------------------------------------------
+            ema9_i = intraday_df["Close"].ewm(span=9).mean().iloc[-1]
+            ema20_i = intraday_df["Close"].ewm(span=20).mean().iloc[-1]
+            ema50_i = intraday_df["Close"].ewm(span=50).mean().iloc[-1]
+
+            if ema9_i > ema20_i > ema50_i:
+                trend = "UP"
+            elif ema9_i < ema20_i < ema50_i:
+                trend = "DOWN"
+            else:
+                trend = "FLAT"
+
+            # ---------------------------------------------------------
+            # FIRST 15-MINUTE MODE MULTIPLIERS
             # ---------------------------------------------------------
             if first_15_mode:
                 gap_score *= 1.5
@@ -245,6 +258,7 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
 
             rows.append({
                 "Ticker": ticker,
+                "Trend": trend,
                 "Close": round(current_price, 2),
                 "Gap%": round(gap_pct, 2),
                 "Current_vs_Close%": round(current_vs_close_pct, 2),
@@ -276,15 +290,30 @@ first_15_mode = st.checkbox("Enable First 15-Minute Momentum Mode", value=True)
 st.markdown("### 🎛️ Momentum Score Filter")
 min_momentum_score = st.number_input("Minimum Momentum Score", value=4.0, min_value=0.0, max_value=30.0, step=0.5)
 
+# ---------------------------------------------------------
+# COLOR CODING
+# ---------------------------------------------------------
 def color_momentum_column(df):
     style_df = pd.DataFrame('', index=df.index, columns=df.columns)
     if "Momentum_Score" in df.columns:
         style_df["Momentum_Score"] = [
-            "background-color: #4CAF50; color: white; font-weight: bold;" if v >= 8
-            else "background-color: #FFC107; color: black; font-weight: bold;" if v >= 5
-            else "background-color: #FF9800; color: white;" if v >= 3
-            else "background-color: #9E9E9E; color: white;" for v in df["Momentum_Score"]
+            "background-color: #4CAF50; color: white; font-weight: bold;" if v >= 12
+            else "background-color: #FFC107; color: black; font-weight: bold;" if v >= 8
+            else "background-color: #F44336; color: white;" for v in df["Momentum_Score"]
         ]
+    return style_df
+
+def color_trend_column(df):
+    style_df = pd.DataFrame('', index=df.index, columns=df.columns)
+    if "Trend" in df.columns:
+        for i in range(len(df)):
+            t = df.iloc[i]["Trend"]   # <-- FIXED
+            if t == "UP":
+                style_df.loc[df.index[i], "Trend"] = "background-color:#4CAF50;color:white;font-weight:bold;"
+            elif t == "FLAT":
+                style_df.loc[df.index[i], "Trend"] = "background-color:#FFC107;color:black;font-weight:bold;"
+            else:
+                style_df.loc[df.index[i], "Trend"] = "background-color:#F44336;color:white;"
     return style_df
 
 # ---------------------------------------------------------
@@ -299,7 +328,6 @@ if run_momentum:
         eastern = pytz.timezone("US/Eastern")
         now_est = datetime.now().astimezone(eastern)
 
-        # Momentum window indicator
         if now_est.hour == 9 and now_est.minute < 45:
             momentum_window = "EARLY (Ignition)"
         elif now_est.hour == 9 and now_est.minute < 60:
@@ -351,9 +379,41 @@ if "momentum_raw_ranking" in st.session_state:
         else:
             display_df = filtered.copy()
 
-            # ⭐ SORT BY MOMENTUM SCORE DESCENDING
             display_df = display_df.sort_values(by="Momentum_Score", ascending=False)
 
             st.subheader(f"🔥 High-Velocity Momentum Matrix — {len(display_df)} Tickers")
-            st.dataframe(display_df.style.apply(color_momentum_column, axis=None),
-                         hide_index=True, use_container_width=True)
+            st.dataframe(
+                display_df.style.apply(color_momentum_column, axis=None)
+                             .apply(color_trend_column, axis=None),
+                hide_index=True,
+                use_container_width=True
+            )
+
+            # ---------------------------------------------------------
+            # ⭐ TOP 5 MOMENTUM HISTORY TRACKER
+            # ---------------------------------------------------------
+            if "momentum_history_date" not in st.session_state:
+                st.session_state["momentum_history_date"] = date.today()
+
+            if "momentum_history" not in st.session_state:
+                st.session_state["momentum_history"] = []
+
+            if st.session_state["momentum_history_date"] != date.today():
+                st.session_state["momentum_history"] = []
+                st.session_state["momentum_history_date"] = date.today()
+
+            top5 = display_df.head(5).copy()
+            top5["Timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            st.session_state["momentum_history"].append(top5)
+
+            history_df = pd.concat(st.session_state["momentum_history"], ignore_index=True)
+
+            st.subheader("📊 Momentum Timeline — Top 5 per Scan")
+
+            st.dataframe(
+                history_df.style.apply(color_momentum_column, axis=None)
+                                .apply(color_trend_column, axis=None),
+                hide_index=True,
+                use_container_width=True
+            )

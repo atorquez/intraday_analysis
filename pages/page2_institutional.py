@@ -1,5 +1,5 @@
 # ==============================================================================
-# 📈 STRUCTURAL ENGINE PAGE 1 — COMPLETE UNIFIED MASTER CODE
+# 📈 INSTITUTIONAL MODEL
 # SPECIFICATION: PREMIUM UNIVERSE STRUCTURAL TRACKING SYSTEM (>$50 TICKERS)
 # INCLUDES: HIGH-SPEED PROXIMITY, SPREADS, AND MULTI-CORE ESTIMATIONS
 # ==============================================================================
