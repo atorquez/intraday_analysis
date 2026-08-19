@@ -5,9 +5,9 @@
 # ==============================================================================
 import streamlit as st
 
-st.set_page_config(layout="wide", page_title="Structural Engine Page1")
-st.caption("Version: 2026-08-01")
-st.title("📈 Structural Engine Page 1")
+st.set_page_config(layout="wide", page_title="Institutional Model")
+st.caption("Version: 2026-08-19")
+st.title("📈 Institutional Model")
 
 import importlib
 import time

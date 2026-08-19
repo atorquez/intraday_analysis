@@ -3,9 +3,9 @@
 # ==============================================================================
 import streamlit as st
 
-st.set_page_config(layout="wide", page_title="Momentum Engine")
-st.caption("Version: 2026-08-01")
-st.title("🚀 Momentum Engine — Aggressive Early-Session Scanner")
+st.set_page_config(layout="wide", page_title="Momentum Model")
+st.caption("Version: 2026-08-19")
+st.title("🚀 Momentum Model — Aggressive Early-Session Scanner")
 
 import importlib
 import time
