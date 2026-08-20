@@ -1,11 +1,11 @@
 # ==============================================================================
-# 🚀 MOMENTUM ENGINE — FIRST 15-MINUTE OPTIMIZED MODEL + TOP5 TRACKER
+# 🚀 MOMENTUM ENGINE — UNIVERSAL MODEL + TOP5 TRACKER
 # ==============================================================================
 import streamlit as st
 
 st.set_page_config(layout="wide", page_title="Momentum Model")
-st.caption("Version: 2026-08-19")
-st.title("🚀 Momentum Model — Aggressive Early-Session Scanner")
+st.caption("Version: 2026-08-20")
+st.title("🚀 Momentum Model — Universal Momentum Scanner")
 
 import importlib
 import time
@@ -62,9 +62,9 @@ def to_scalar(x):
             return float("nan")
 
 # ---------------------------------------------------------
-# MOMENTUM ENGINE + TREND
+# UNIVERSAL MOMENTUM ENGINE + TREND + DRIFT PENALTY
 # ---------------------------------------------------------
-def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_price, first_15_mode):
+def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_price):
     rows = []
     if batch_daily is None or batch_daily.empty or batch_intra is None or batch_intra.empty:
         return pd.DataFrame()
@@ -98,7 +98,8 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
             low_intra = intraday_df["Low"].values
             vol_intra = intraday_df["Volume"].values
 
-            if len(close_intra) < 10:
+            # Allow afternoon scans (Yahoo often returns fewer bars)
+            if len(close_intra) < 5:
                 continue
 
             current_intraday_price = float(close_intra[-1])
@@ -113,11 +114,16 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
             current_vs_close_pct = ((current_intraday_price - prev_close_d) / prev_close_d) * 100
 
             # ---------------------------------------------------------
-            # A. GAP MAGNITUDE
+            # ⭐ A. GAP QUALITY (UNIVERSAL)
             # ---------------------------------------------------------
             gap_pct = ((session_open_price - prev_close_d) / prev_close_d) * 100
-            if gap_pct > 5.0:
-                gap_score = 4.0
+
+            if gap_pct > 20.0:
+                gap_score = 0.0
+            elif gap_pct > 12.0:
+                gap_score = 1.0
+            elif gap_pct > 8.0:
+                gap_score = 2.0
             elif gap_pct > 3.0:
                 gap_score = 3.0
             elif gap_pct > 1.0:
@@ -128,19 +134,19 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 gap_score = 0.0
 
             # ---------------------------------------------------------
-            # B. FIRST-HOUR VELOCITY (EMA9 SLOPE)
+            # ⭐ B. VELOCITY (EMA9 SLOPE — UNIVERSAL)
             # ---------------------------------------------------------
             ema9_i_series = intraday_df["Close"].ewm(span=9).mean().values
-            if len(ema9_i_series) >= 10:
-                ema9_slope_10 = float((ema9_i_series[-1] - ema9_i_series[-10]) / ema9_i_series[-10]) * 100
+            if len(ema9_i_series) >= 5:
+                ema9_slope_10 = float((ema9_i_series[-1] - ema9_i_series[-5]) / ema9_i_series[-5]) * 100
             else:
                 ema9_slope_10 = 0.0
 
-            if ema9_slope_10 > 0.40:
+            if ema9_slope_10 > 0.60:
                 velocity_score = 4.0
-            elif ema9_slope_10 > 0.20:
+            elif ema9_slope_10 > 0.30:
                 velocity_score = 3.0
-            elif ema9_slope_10 > 0.10:
+            elif ema9_slope_10 > 0.15:
                 velocity_score = 2.0
             elif ema9_slope_10 > 0.00:
                 velocity_score = 1.0
@@ -148,7 +154,7 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 velocity_score = 0.0
 
             # ---------------------------------------------------------
-            # C. RVOL IGNITION
+            # ⭐ C. RVOL IGNITION (UNIVERSAL)
             # ---------------------------------------------------------
             intraday_total_volume = float(vol_intra.sum())
             rvol = float(intraday_total_volume / avg_volume_20d) if avg_volume_20d > 0 else 1.0
@@ -159,13 +165,13 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 rvol_score = 3.0
             elif rvol > 2.0:
                 rvol_score = 2.0
-            elif rvol > 1.0:
+            elif rvol > 1.2:
                 rvol_score = 1.0
             else:
                 rvol_score = 0.0
 
             # ---------------------------------------------------------
-            # D. BREAKOUT CONFIRMATION
+            # ⭐ D. BREAKOUT QUALITY (UNIVERSAL)
             # ---------------------------------------------------------
             premarket_window = intraday_df.head(10)
             premarket_high = float(premarket_window["High"].max()) if not premarket_window.empty else session_open_price
@@ -182,19 +188,21 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 breakout_score += 2.0
 
             # ---------------------------------------------------------
-            # E. VOLATILITY EXPANSION
+            # ⭐ E. VOLATILITY COHERENCE (UNIVERSAL)
             # ---------------------------------------------------------
             intraday_range_pct = float((high_intra[-1] - low_intra[-1]) / current_intraday_price * 100)
 
-            if intraday_range_pct > 1.0:
+            if intraday_range_pct > 1.5:
+                volatility_score = 0.0
+            elif intraday_range_pct > 0.8:
                 volatility_score = 2.0
-            elif intraday_range_pct > 0.5:
+            elif intraday_range_pct > 0.4:
                 volatility_score = 1.0
             else:
                 volatility_score = 0.0
 
             # ---------------------------------------------------------
-            # F. EMA STACK (DAILY)
+            # ⭐ F. DAILY EMA STACK (UNIVERSAL)
             # ---------------------------------------------------------
             ema9_d = daily_df["Close"].ewm(span=9).mean().values
             ema20_d = daily_df["Close"].ewm(span=20).mean().values
@@ -206,7 +214,7 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 ema_stack_score = 0.0
 
             # ---------------------------------------------------------
-            # G. VWAP RECLAIM
+            # ⭐ G. VWAP RELATIONSHIP (UNIVERSAL)
             # ---------------------------------------------------------
             cv_slice = vol_intra * close_intra
             vwap_spot = cv_slice.sum() / vol_intra.sum() if vol_intra.sum() > 0 else current_intraday_price
@@ -231,22 +239,35 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 trend = "FLAT"
 
             # ---------------------------------------------------------
-            # FIRST 15-MINUTE MODE MULTIPLIERS
+            # ⭐ H. DRIFT PENALTY (UNIVERSAL)
             # ---------------------------------------------------------
-            if first_15_mode:
-                gap_score *= 1.5
-                velocity_score *= 2.0
-                rvol_score *= 1.5
-                breakout_score *= 2.0
+            drift_flags = 0
 
-                volatility_score *= 0.5
-                ema_stack_score *= 0.5
-                vwap_reclaim_score *= 0.5
+            if abs(ema9_slope_10) < 0.05:
+                drift_flags += 1
+            if rvol < 1.2:
+                drift_flags += 1
+            if intraday_range_pct < 0.4:
+                drift_flags += 1
+            vwap_dist_pct = abs(current_intraday_price - vwap_spot) / current_intraday_price * 100
+            if vwap_dist_pct < 0.3:
+                drift_flags += 1
+
+            if drift_flags == 0:
+                drift_multiplier = 1.0
+            elif drift_flags == 1:
+                drift_multiplier = 0.8
+            elif drift_flags == 2:
+                drift_multiplier = 0.6
+            elif drift_flags == 3:
+                drift_multiplier = 0.4
+            else:
+                drift_multiplier = 0.3
 
             # ---------------------------------------------------------
-            # FINAL MOMENTUM SCORE
+            # ⭐ FINAL UNIVERSAL MOMENTUM SCORE
             # ---------------------------------------------------------
-            momentum_score = (
+            base_momentum_score = (
                 gap_score +
                 velocity_score +
                 rvol_score +
@@ -255,6 +276,8 @@ def momentum_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, m
                 ema_stack_score +
                 vwap_reclaim_score
             )
+
+            momentum_score = base_momentum_score * drift_multiplier
 
             rows.append({
                 "Ticker": ticker,
@@ -284,9 +307,6 @@ st.markdown("### 🔍 Price Boundaries Filter (Momentum Universe)")
 min_price = st.number_input("Minimum Asset Price ($)", value=40.0, min_value=40.0, max_value=110.0)
 max_price = st.number_input("Maximum Asset Price ($)", value=110.0, min_value=40.0, max_value=110.0)
 
-st.markdown("### 🔥 First 15-Minute Mode")
-first_15_mode = st.checkbox("Enable First 15-Minute Momentum Mode", value=True)
-
 st.markdown("### 🎛️ Momentum Score Filter")
 min_momentum_score = st.number_input("Minimum Momentum Score", value=4.0, min_value=0.0, max_value=30.0, step=0.5)
 
@@ -307,7 +327,7 @@ def color_trend_column(df):
     style_df = pd.DataFrame('', index=df.index, columns=df.columns)
     if "Trend" in df.columns:
         for i in range(len(df)):
-            t = df.iloc[i]["Trend"]   # <-- FIXED
+            t = df.iloc[i]["Trend"]
             if t == "UP":
                 style_df.loc[df.index[i], "Trend"] = "background-color:#4CAF50;color:white;font-weight:bold;"
             elif t == "FLAT":
@@ -319,7 +339,7 @@ def color_trend_column(df):
 # ---------------------------------------------------------
 # RUN MOMENTUM ENGINE
 # ---------------------------------------------------------
-run_momentum = st.button("Run Momentum Model Scan (Page 8)")
+run_momentum = st.button("Run Momentum Model Scan")
 
 if run_momentum:
     try:
@@ -328,14 +348,6 @@ if run_momentum:
         eastern = pytz.timezone("US/Eastern")
         now_est = datetime.now().astimezone(eastern)
 
-        if now_est.hour == 9 and now_est.minute < 45:
-            momentum_window = "EARLY (Ignition)"
-        elif now_est.hour == 9 and now_est.minute < 60:
-            momentum_window = "MID (Breakout)"
-        else:
-            momentum_window = "LATE (Fade)"
-
-        st.markdown(f"🕒 Momentum Window: **{momentum_window}**")
         st.markdown(f"⏱️ Momentum Scan Time Stamp: **{now_est.strftime('%Y-%m-%d %H:%M:%S')} EST**")
 
         progress_bar = st.progress(0, text="Synchronizing clean global exchange batch maps for momentum engine...")
@@ -345,8 +357,8 @@ if run_momentum:
 
         raw_daily, raw_intra = fetch_clean_market_batch(tuple(universe_list))
 
-        progress_bar.progress(0.4, text="Running high-velocity momentum scoring array...")
-        ranking = momentum_rank_universe_batch(universe_list, raw_daily, raw_intra, min_price, max_price, first_15_mode)
+        progress_bar.progress(0.4, text="Running universal momentum scoring array...")
+        ranking = momentum_rank_universe_batch(universe_list, raw_daily, raw_intra, min_price, max_price)
 
         if ranking is not None and not ranking.empty:
             st.session_state["momentum_raw_ranking"] = ranking
@@ -378,16 +390,23 @@ if "momentum_raw_ranking" in st.session_state:
             st.info("No tickers matched your momentum score and price filters.")
         else:
             display_df = filtered.copy()
-
             display_df = display_df.sort_values(by="Momentum_Score", ascending=False)
 
-            st.subheader(f"🔥 High-Velocity Momentum Matrix — {len(display_df)} Tickers")
+            st.subheader(f"🔥 Universal Momentum Matrix — {len(display_df)} Tickers")
             st.dataframe(
                 display_df.style.apply(color_momentum_column, axis=None)
-                             .apply(color_trend_column, axis=None),
+                                 .apply(color_trend_column, axis=None),
                 hide_index=True,
                 use_container_width=True
             )
+
+            # ---------------------------------------------------------
+            # ⭐ RESET MOMENTUM TRACKER BUTTON
+            # ---------------------------------------------------------
+            if st.button("Reset Momentum Tracker"):
+                st.session_state["momentum_history"] = []
+                st.session_state["momentum_history_date"] = date.today()
+                st.success("Momentum tracker has been reset.")
 
             # ---------------------------------------------------------
             # ⭐ TOP 5 MOMENTUM HISTORY TRACKER
