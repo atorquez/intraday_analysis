@@ -1,4 +1,4 @@
-from matplotlib import ticker
+#PART 1
 import streamlit as st
 import time
 import numpy as np
@@ -16,12 +16,11 @@ st.set_page_config(
 )
 
 st.caption(
-    "Version: 2026-08-23 — Momentum + Price Position + "
+    "Version: 2026-08-24 — Momentum + Price Position + "
     "Profit Target + Continuation Score"
 )
 
 st.title("🚀 Universal Momentum Scanner — With Continuation Probability")
-
 
 # =========================================================
 # SESSION STATE
@@ -46,7 +45,6 @@ if "momentum_history_date" not in st.session_state:
 
 if "momentum_raw_ranking" not in st.session_state:
     st.session_state["momentum_raw_ranking"] = pd.DataFrame()
-
 
 # =========================================================
 # PRICE POSITION + PROFIT TARGET LOGIC
@@ -74,7 +72,6 @@ def compute_price_position(entry_price, current_price):
     else:
         return "SAFE"
 
-
 # =========================================================
 # PROFIT TARGET
 # =========================================================
@@ -87,7 +84,6 @@ def compute_profit_target(entry_price, pct=0.015):
         return None
 
     return entry_price * (1.0 + pct)
-
 
 # =========================================================
 # EXIT SIGNAL
@@ -117,7 +113,6 @@ def compute_exit_signal(entry_price, current_price):
 
     else:
         return "HOLD"
-
 
 # =========================================================
 # CONTINUATION SCORE
@@ -241,7 +236,6 @@ def continuation_score(
 
     return A + B + C + D
 
-
 # =========================================================
 # COLOR CODING — CONTINUATION SCORE
 # =========================================================
@@ -311,7 +305,6 @@ def color_continuation(df):
 
     return style_df
 
-
 # =========================================================
 # COLOR CODING — PRICE POSITION
 # =========================================================
@@ -376,7 +369,6 @@ def color_price_position(df):
 
     return style_df
 
-
 # =========================================================
 # COLOR CODING — EXIT SIGNAL
 # =========================================================
@@ -430,7 +422,6 @@ def color_exit_signal(df):
 
     return style_df
 
-
 # =========================================================
 # DATA FETCH
 # =========================================================
@@ -469,7 +460,6 @@ def fetch_clean_market_batch(tickers_tuple):
     except Exception:
 
         return pd.DataFrame(), pd.DataFrame()
-
 
 # =========================================================
 # FETCH FLOAT + MARKET CAP
@@ -604,8 +594,7 @@ def fetch_float_marketcap(ticker):
             0.0,
             "Unavailable"
         )
-
-
+#PART 2
 # =========================================================
 # MOMENTUM ENGINE (with continuation score)
 # =========================================================
@@ -709,8 +698,8 @@ def momentum_rank_universe_batch(
             data_as_of = (
                 latest_intraday_timestamp
                 .strftime("%Y-%m-%d %H:%M:%S")
-            )
-
+                )   
+           
             vol_d = daily_df["Volume"].values
 
             avg_volume_20d = (
@@ -772,31 +761,107 @@ def momentum_rank_universe_batch(
             intraday_total_volume = float(
                 vol_i.sum()
             )
+            #OLD RVOL ==========================================
+            #rvol = (
+            #                float(
+            #                    intraday_total_volume
+            #                    / avg_volume_20d
+            #                )
+            #                if avg_volume_20d > 0
+            #                else 1.0
+            #            )
 
-            rvol = (
-                float(
-                    intraday_total_volume
-                    / avg_volume_20d
-                )
-                if avg_volume_20d > 0
-                else 1.0
+            #NEW RVOL CALCULATION
+            # =================================================
+            # TIME-OF-DAY ADJUSTED RVOL
+            #
+            # We compare today's accumulated volume against
+            # the amount of volume normally expected to have
+            # traded by this time of day.
+            #
+            # Regular US session:
+            # 09:30 - 16:00 = 390 minutes
+            # =================================================
+
+            intraday_total_volume = float(
+                vol_i.sum()
             )
+
+            latest_bar_time = intraday_df.index[-1]
+
+            # Convert to Eastern if necessary
+            if latest_bar_time.tzinfo is None:
+                latest_bar_time = eastern.localize(
+                    latest_bar_time
+                )
+            else:
+                latest_bar_time = latest_bar_time.astimezone(
+                    eastern
+                )
+
+            market_open = latest_bar_time.replace(
+                        hour=9,
+                        minute=30,
+                        second=0,
+                        microsecond=0
+            )
+
+            market_close = latest_bar_time.replace(
+                hour=16,
+                minute=0,
+                second=0,
+                microsecond=0
+            )
+
+            elapsed_minutes = (
+                        latest_bar_time - market_open
+            ).total_seconds() / 60.0
+
+            #Keep elapsed time inside the regular session
+            elapsed_minutes = max(
+                        1.0,
+                        min(
+                            elapsed_minutes,
+                            390.0
+                        )
+            )
+
+            session_fraction = (
+                        elapsed_minutes / 390.0
+            )
+
+            # Expected volume assuming the average daily volume
+            # is distributed across the regular session.
+            expected_volume_by_now = (
+                        avg_volume_20d
+                        * session_fraction
+            )
+
+            if expected_volume_by_now > 0:
+
+                rvol = (
+                    intraday_total_volume
+                    / expected_volume_by_now
+                )
+            else:
+
+                rvol = 1.0
 
             cv_slice = vol_i * close_i
 
             vwap_spot = (
-                cv_slice.sum() / vol_i.sum()
-                if vol_i.sum() > 0
-                else current_price
+                        cv_slice.sum() / vol_i.sum()
+                        if vol_i.sum() > 0
+                        else current_price
             )
 
             high_i = intraday_df["High"].iloc[-1]
             low_i = intraday_df["Low"].iloc[-1]
 
             range_pct = (
-                ((high_i - low_i) / low_i) * 100
-                if low_i > 0
-                else 0
+            ((high_i - low_i) / low_i) * 100
+            if low_i > 0
+            else 0
             )
 
             float_val, market_cap, shares_outstanding, float_source = fetch_float_marketcap(ticker)
@@ -917,7 +982,6 @@ def momentum_rank_universe_batch(
 
     return df
 
-
 # =========================================================
 # SIDEBAR FILTERS
 # =========================================================
@@ -949,8 +1013,7 @@ min_momentum_score = st.number_input(
     step=0.5,
     key="momentum_min_score"
 )
-
-
+#PART 3
 # =========================================================
 # RUN MOMENTUM ENGINE
 # =========================================================
@@ -1071,7 +1134,6 @@ if run_momentum:
         )
 
         st.exception(e)
-
 
 # =========================================================
 # RENDER RESULTS PANEL
