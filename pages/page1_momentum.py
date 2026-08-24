@@ -1,3 +1,4 @@
+from matplotlib import ticker
 import streamlit as st
 import time
 import numpy as np
@@ -148,9 +149,6 @@ def continuation_score(
 
     # -----------------------------------------------------
     # Invalid float
-    #
-    # We cannot calculate a meaningful low-float score
-    # without a valid public float.
     # -----------------------------------------------------
     if (
         not np.isfinite(float_val)
@@ -177,8 +175,6 @@ def continuation_score(
 
         # -------------------------------------------------
         # C — RVOL / Float Score
-        #
-        # Float is converted to millions of shares.
         # -------------------------------------------------
         float_millions = float_val / 1_000_000
 
@@ -433,6 +429,8 @@ def color_exit_signal(df):
             )
 
     return style_df
+
+
 # =========================================================
 # DATA FETCH
 # =========================================================
@@ -446,9 +444,6 @@ def fetch_clean_market_batch(tickers_tuple):
 
     try:
 
-        # -------------------------------------------------
-        # DAILY DATA
-        # -------------------------------------------------
         raw_daily = yf.download(
             ticker_list,
             period="3mo",
@@ -459,9 +454,6 @@ def fetch_clean_market_batch(tickers_tuple):
             auto_adjust=False
         )
 
-        # -------------------------------------------------
-        # INTRADAY DATA
-        # -------------------------------------------------
         raw_intra = yf.download(
             ticker_list,
             period="1d",
@@ -481,14 +473,6 @@ def fetch_clean_market_batch(tickers_tuple):
 
 # =========================================================
 # FETCH FLOAT + MARKET CAP
-#
-# IMPORTANT:
-#
-# floatShares       = public float when available
-# sharesOutstanding = fallback only
-#
-# The returned "float_val" is therefore the best available
-# estimate of public float.
 # =========================================================
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_float_marketcap(ticker):
@@ -502,14 +486,10 @@ def fetch_float_marketcap(ticker):
         shares_outstanding = 0.0
         float_source = "Unavailable"
 
-        # =================================================
-        # STEP 1 — FAST_INFO
-        # =================================================
         try:
 
             fast = ticker_obj.fast_info
 
-            # Market cap
             try:
                 market_cap = float(
                     fast.get("market_cap", 0) or 0
@@ -517,7 +497,6 @@ def fetch_float_marketcap(ticker):
             except Exception:
                 market_cap = 0.0
 
-            # Shares outstanding
             try:
                 shares_outstanding = float(
                     fast.get("shares_outstanding", 0) or 0
@@ -529,23 +508,10 @@ def fetch_float_marketcap(ticker):
 
             fast = None
 
-
-        # =================================================
-        # STEP 2 — INFO FALLBACK
-        #
-        # Yahoo may provide:
-        #
-        # floatShares
-        # sharesOutstanding
-        # marketCap
-        # =================================================
         try:
 
             info = ticker_obj.info
 
-            # -------------------------------------------------
-            # PUBLIC FLOAT
-            # -------------------------------------------------
             yahoo_float = info.get(
                 "floatShares",
                 0
@@ -562,10 +528,6 @@ def fetch_float_marketcap(ticker):
                 except Exception:
                     float_val = 0.0
 
-
-            # -------------------------------------------------
-            # SHARES OUTSTANDING
-            # -------------------------------------------------
             if shares_outstanding <= 0:
 
                 yahoo_shares = info.get(
@@ -582,10 +544,6 @@ def fetch_float_marketcap(ticker):
                     except Exception:
                         shares_outstanding = 0.0
 
-
-            # -------------------------------------------------
-            # MARKET CAP
-            # -------------------------------------------------
             if market_cap <= 0:
 
                 yahoo_market_cap = info.get(
@@ -606,16 +564,6 @@ def fetch_float_marketcap(ticker):
 
             pass
 
-
-        # =================================================
-        # STEP 3 — FALLBACK
-        #
-        # If Yahoo does not provide public float,
-        # use shares outstanding as an approximation.
-        #
-        # We explicitly label the source so it can be
-        # identified in the results.
-        # =================================================
         if float_val <= 0:
 
             if shares_outstanding > 0:
@@ -623,10 +571,6 @@ def fetch_float_marketcap(ticker):
                 float_val = shares_outstanding
                 float_source = "sharesOutstanding_fallback"
 
-
-        # =================================================
-        # STEP 4 — VALIDATE VALUES
-        # =================================================
         if (
             not np.isfinite(float_val)
             or float_val < 0
@@ -645,14 +589,12 @@ def fetch_float_marketcap(ticker):
         ):
             shares_outstanding = 0.0
 
-
         return (
             float_val,
             market_cap,
             shares_outstanding,
             float_source
         )
-
 
     except Exception:
 
@@ -662,6 +604,7 @@ def fetch_float_marketcap(ticker):
             0.0,
             "Unavailable"
         )
+
 
 # =========================================================
 # MOMENTUM ENGINE (with continuation score)
@@ -684,16 +627,10 @@ def momentum_rank_universe_batch(
     ):
         return pd.DataFrame()
 
-    # =====================================================
-    # EASTERN TIME / CURRENT DATE
-    # =====================================================
     eastern = pytz.timezone("US/Eastern")
     now_est = datetime.now(eastern)
     current_date_est = now_est.date()
 
-    # =====================================================
-    # AVAILABLE TICKERS
-    # =====================================================
     available_daily = set(
         batch_daily.columns.get_level_values(0)
     )
@@ -708,25 +645,16 @@ def momentum_rank_universe_batch(
         .intersection(available_intra)
     )
 
-    # =====================================================
-    # PROCESS EACH TICKER
-    # =====================================================
     for ticker in active_pool:
 
         try:
 
-            # =================================================
-            # DAILY DATA
-            # =================================================
             daily_df = (
                 batch_daily[ticker]
                 .copy()
                 .dropna(subset=["Close"])
             )
 
-            # =================================================
-            # INTRADAY DATA
-            # =================================================
             intraday_df = (
                 batch_intra[ticker]
                 .copy()
@@ -739,16 +667,6 @@ def momentum_rank_universe_batch(
                 or len(daily_df) < 40
             ):
                 continue
-
-            # =================================================
-            # IMPORTANT FIX:
-            #
-            # Verify that the latest 1-minute bar belongs
-            # to TODAY in US/Eastern time.
-            #
-            # This prevents Friday's data from being used
-            # as Sunday's momentum.
-            # =================================================
 
             try:
 
@@ -785,23 +703,14 @@ def momentum_rank_universe_batch(
                 latest_intraday_timestamp.date()
             )
 
-            # -------------------------------------------------
-            # REJECT OLD INTRADAY DATA
-            # -------------------------------------------------
             if latest_intraday_date != current_date_est:
                 continue
 
-            # =================================================
-            # DATA AS OF
-            # =================================================
             data_as_of = (
                 latest_intraday_timestamp
                 .strftime("%Y-%m-%d %H:%M:%S")
             )
 
-            # =================================================
-            # DAILY VOLUME
-            # =================================================
             vol_d = daily_df["Volume"].values
 
             avg_volume_20d = (
@@ -813,14 +722,8 @@ def momentum_rank_universe_batch(
             if avg_volume_20d < 250000:
                 continue
 
-            # =================================================
-            # CURRENT PRICE
-            #
-            # Keep original model behavior:
-            # use latest DAILY close.
-            # =================================================
             current_price = float(
-                daily_df["Close"].iloc[-1]
+                intraday_df["Close"].iloc[-1]
             )
 
             if (
@@ -829,18 +732,12 @@ def momentum_rank_universe_batch(
             ):
                 continue
 
-            # =================================================
-            # INTRADAY DATA
-            # =================================================
             close_i = intraday_df["Close"].values
             vol_i = intraday_df["Volume"].values
 
             if len(close_i) < 5:
                 continue
 
-            # =================================================
-            # EMA9 SLOPE
-            # =================================================
             ema9_i_series = (
                 intraday_df["Close"]
                 .ewm(span=9)
@@ -872,20 +769,10 @@ def momentum_rank_universe_batch(
 
                 ema9_slope_10 = 0.0
 
-            # =================================================
-            # INTRADAY TOTAL VOLUME
-            #
-            # Keep original calculation.
-            # =================================================
             intraday_total_volume = float(
                 vol_i.sum()
             )
 
-            # =================================================
-            # RVOL
-            #
-            # Keep original model calculation.
-            # =================================================
             rvol = (
                 float(
                     intraday_total_volume
@@ -895,11 +782,6 @@ def momentum_rank_universe_batch(
                 else 1.0
             )
 
-            # =================================================
-            # VWAP
-            #
-            # Keep original calculation.
-            # =================================================
             cv_slice = vol_i * close_i
 
             vwap_spot = (
@@ -908,11 +790,6 @@ def momentum_rank_universe_batch(
                 else current_price
             )
 
-            # =================================================
-            # INTRADAY RANGE
-            #
-            # Keep original calculation using latest bar.
-            # =================================================
             high_i = intraday_df["High"].iloc[-1]
             low_i = intraday_df["Low"].iloc[-1]
 
@@ -922,16 +799,8 @@ def momentum_rank_universe_batch(
                 else 0
             )
 
-            # =================================================
-            # FLOAT + MARKET CAP
-            # =================================================
-            shares_out, market_cap = (
-                fetch_float_marketcap(ticker)
-            )
+            float_val, market_cap, shares_outstanding, float_source = fetch_float_marketcap(ticker)
 
-            # =================================================
-            # VELOCITY SCORE
-            # =================================================
             if ema9_slope_10 > 0.60:
 
                 velocity_score = 4.0
@@ -952,9 +821,6 @@ def momentum_rank_universe_batch(
 
                 velocity_score = 0.0
 
-            # =================================================
-            # RVOL SCORE
-            # =================================================
             if rvol > 5.0:
 
                 rvol_score = 4.0
@@ -975,27 +841,18 @@ def momentum_rank_universe_batch(
 
                 rvol_score = 0.0
 
-            # =================================================
-            # MOMENTUM SCORE
-            # =================================================
             momentum_score = (
                 velocity_score
                 + rvol_score
             )
 
-            # =================================================
-            # CONTINUATION SCORE
-            # =================================================
             cont_score = continuation_score(
-                shares_out,
+                float_val,
                 market_cap,
                 rvol,
                 range_pct
             )
 
-            # =================================================
-            # SAVE RESULT
-            # =================================================
             rows.append({
 
                 "Ticker": ticker,
@@ -1022,7 +879,7 @@ def momentum_rank_universe_batch(
                     2
                 ),
 
-                "Float": shares_out,
+                "Float": float_val,
 
                 "Market_Cap": market_cap,
 
@@ -1036,9 +893,6 @@ def momentum_rank_universe_batch(
                     3
                 ),
 
-                # NEW:
-                # Shows exactly when the 1-minute data
-                # used by the model was last updated.
                 "Data_As_Of": data_as_of
             })
 
@@ -1046,15 +900,9 @@ def momentum_rank_universe_batch(
 
             continue
 
-    # =========================================================
-    # NO RESULTS
-    # =========================================================
     if not rows:
         return pd.DataFrame()
 
-    # =========================================================
-    # CREATE DATAFRAME
-    # =========================================================
     df = pd.DataFrame(rows)
 
     df["Momentum_Score"] = pd.to_numeric(
@@ -1127,9 +975,6 @@ if run_momentum:
             eastern
         )
 
-        # =================================================
-        # WEEKEND CHECK
-        # =================================================
         if now_est.weekday() >= 5:
 
             st.warning(
@@ -1145,9 +990,6 @@ if run_momentum:
 
             st.stop()
 
-        # =================================================
-        # SCAN TIME
-        # =================================================
         st.markdown(
             f"⏱️ Scan Time: "
             f"**{now_est.strftime('%Y-%m-%d %H:%M:%S')} EST**"
@@ -1158,9 +1000,6 @@ if run_momentum:
             text="Loading universe..."
         )
 
-        # =================================================
-        # LOAD UNIVERSE
-        # =================================================
         from utils.data_fetch import load_universe
 
         universe_list = load_universe()
@@ -1170,9 +1009,6 @@ if run_momentum:
             text="Loading market data..."
         )
 
-        # =================================================
-        # FETCH MARKET DATA
-        # =================================================
         raw_daily, raw_intra = (
             fetch_clean_market_batch(
                 tuple(universe_list)
@@ -1187,9 +1023,6 @@ if run_momentum:
             )
         )
 
-        # =================================================
-        # RUN ENGINE
-        # =================================================
         ranking = momentum_rank_universe_batch(
             universe_list,
             raw_daily,
@@ -1198,9 +1031,6 @@ if run_momentum:
             max_price
         )
 
-        # =================================================
-        # SAVE RESULTS
-        # =================================================
         if (
             ranking is not None
             and not ranking.empty
@@ -1291,9 +1121,6 @@ if (
                 ascending=False
             )
 
-            # =================================================
-            # DATA FRESHNESS DISPLAY
-            # =================================================
             if "Data_As_Of" in display_df.columns:
 
                 data_as_of_values = (
@@ -1309,9 +1136,6 @@ if (
                         f"**{data_as_of_values[0]} EST**"
                     )
 
-            # =================================================
-            # MATRIX
-            # =================================================
             st.subheader(
                 f"🔥 Momentum Matrix — "
                 f"{len(display_df)} Tickers"
@@ -1326,9 +1150,6 @@ if (
                 use_container_width=True
             )
 
-            # =================================================
-            # RESET MOMENTUM TRACKER
-            # =================================================
             if st.button(
                 "Reset Momentum Tracker",
                 key="reset_momentum_tracker"
@@ -1362,9 +1183,6 @@ if (
                     "Momentum tracker reset."
                 )
 
-            # =================================================
-            # NEW DAY RESET
-            # =================================================
             if (
                 st.session_state[
                     "momentum_history_date"
@@ -1396,31 +1214,22 @@ if (
                     "profit_targets"
                 ] = {}
 
-            # =================================================
-            # TOP 5
-            # =================================================
             top5 = display_df.head(5).copy()
 
             top5["Timestamp"] = (
                 datetime.now(
                     pytz.timezone("US/Eastern")
                 ).strftime(
-                    "%Y-%m-%d %H:%M:%S"
+                    "%Y-%m-%d %Y-%m-%d %H:%M:%S"
                 )
             )
 
-            # =================================================
-            # TRACK TOP 5
-            # =================================================
             for idx, row in top5.iterrows():
 
                 ticker = row["Ticker"]
 
                 current_price = row["Close"]
 
-                # -------------------------------------------------
-                # CREATE ENTRY PRICE
-                # -------------------------------------------------
                 if (
                     ticker
                     not in st.session_state[
@@ -1455,9 +1264,6 @@ if (
                         )
                     )
 
-                # -------------------------------------------------
-                # RETRIEVE ENTRY
-                # -------------------------------------------------
                 entry_price = (
                     st.session_state[
                         "entry_prices"
@@ -1470,9 +1276,6 @@ if (
                     ][ticker]
                 )
 
-                # -------------------------------------------------
-                # PRICE POSITION
-                # -------------------------------------------------
                 price_position = (
                     compute_price_position(
                         entry_price,
@@ -1480,9 +1283,6 @@ if (
                     )
                 )
 
-                # -------------------------------------------------
-                # EXIT SIGNAL
-                # -------------------------------------------------
                 exit_signal = (
                     compute_exit_signal(
                         entry_price,
@@ -1490,9 +1290,6 @@ if (
                     )
                 )
 
-                # -------------------------------------------------
-                # PROFIT TARGET
-                # -------------------------------------------------
                 profit_target_hit = (
                     current_price
                     >= profit_target_price
@@ -1517,9 +1314,6 @@ if (
                     else "NO"
                 )
 
-            # =================================================
-            # SAVE HISTORY
-            # =================================================
             st.session_state[
                 "momentum_history"
             ].append(top5)
@@ -1531,9 +1325,6 @@ if (
                 ignore_index=True
             )
 
-            # =================================================
-            # MOMENTUM TIMELINE
-            # =================================================
             st.subheader(
                 "📊 Momentum Timeline — Top 5"
             )
