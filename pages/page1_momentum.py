@@ -455,6 +455,10 @@ def fetch_clean_market_batch(tickers_tuple):
             auto_adjust=False
         )
 
+        # IMPORTANT:
+        # Diagnostics DO NOT belong here because `ticker` does not exist.
+        # Diagnostics must be placed inside the per‑ticker loop in Page1.
+
         return raw_daily, raw_intra
 
     except Exception:
