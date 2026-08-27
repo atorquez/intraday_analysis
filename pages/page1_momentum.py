@@ -965,7 +965,17 @@ def momentum_rank_universe_batch(
                 "Data_As_Of": data_as_of
             })
 
-        except Exception:
+        #OLD EXCEPT BLOCK
+        #except Exception:
+        #
+        #    continue
+        
+        #NEW EXCEPT BLOCK
+        except Exception as e:
+            print(
+                f"ERROR processing {ticker}: "
+                f"{type(e).__name__}: {e}"
+            )
 
             continue
 
