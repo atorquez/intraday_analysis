@@ -251,14 +251,14 @@ min_price = st.number_input(
     "Minimum Asset Close Gate Price ($)",
     value=40.0,
     min_value=40.0,
-    max_value=110.0,
+    max_value=120.0,
     key="page3_min_price"
 )
 max_price = st.number_input(
     "Maximum Asset Close Gate Price ($)",
-    value=110.0,
+    value=120.0,
     min_value=40.0,
-    max_value=110.0,
+    max_value=120.0,
     key="page3_max_price"
 )
 

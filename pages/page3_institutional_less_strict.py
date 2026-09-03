@@ -1,12 +1,12 @@
 # ==============================================================================
 # 📈 INSTITUTIONAL MODEL
-# SPECIFICATION: PREMIUM UNIVERSE STRUCTURAL TRACKING SYSTEM (>$50 TICKERS)
+# SPECIFICATION: PREMIUM UNIVERSE STRUCTURAL TRACKING SYSTEM 
 # INCLUDES: HIGH-SPEED PROXIMITY, SPREADS, AND MULTI-CORE ESTIMATIONS
 # ==============================================================================
 import streamlit as st
 
 st.set_page_config(layout="wide", page_title="Institutional Model")
-st.caption("Version: 2026-08-19")
+st.caption("Version: 2026-09-03 — Price-vs-Close Softened")
 st.title("📈 Institutional Model")
 
 import importlib
@@ -48,8 +48,22 @@ def fetch_clean_market_batch(tickers_tuple):
     if not ticker_list:
         return pd.DataFrame(), pd.DataFrame()
     try:
-        raw_daily = yf.download(ticker_list, period="3mo", interval="1d", group_by="ticker", progress=False, threads=True)
-        raw_intra = yf.download(ticker_list, period="1d", interval="1m", group_by="ticker", progress=False, threads=True)
+        raw_daily = yf.download(
+            ticker_list,
+            period="3mo",
+            interval="1d",
+            group_by="ticker",
+            progress=False,
+            threads=True
+        )
+        raw_intra = yf.download(
+            ticker_list,
+            period="1d",
+            interval="1m",
+            group_by="ticker",
+            progress=False,
+            threads=True
+        )
         return raw_daily, raw_intra
     except Exception as e:
         st.error(f"Batch synchronization layer failed: {e}")
@@ -133,7 +147,11 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             if avg_volume_20d < 250000:
                 continue
 
-            current_price = float(daily_df["Close"].iloc[-1].squeeze() if hasattr(daily_df["Close"].iloc[-1], "squeeze") else daily_df["Close"].iloc[-1])
+            current_price = float(
+                daily_df["Close"].iloc[-1].squeeze()
+                if hasattr(daily_df["Close"].iloc[-1], "squeeze")
+                else daily_df["Close"].iloc[-1]
+            )
             if current_price < min_price or current_price > max_price:
                 continue
 
@@ -151,37 +169,37 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             session_open_price = float(open_intra.ravel()[0]) if hasattr(open_intra, "ravel") else float(open_intra)
 
             # ----------------------------------------------------------------------
-            # 🚨 HARDENED FILTER: CRITERION 3 — THE OPEN-DRIVE SYMMETRY GATE (SOFTENED)
-            # ----------------------------------------------------------------------
+            # 🚨 OPEN-DRIVE SYMMETRY GATE (still protective, but not extreme)
             # Allow mild retrace vs open; only block deep fades
+            # ----------------------------------------------------------------------
             if current_intraday_price < session_open_price * 0.97:
                 continue
 
             # ----------------------------------------------------------------------
-            # 🚨 GATE 1: THE INSTITUTIONAL SPREAD GATE (SOFTENED)
+            # 🚨 GATE 1: INSTITUTIONAL SPREAD GATE
+            # Allow up to ~0.5% implied spread
             # ----------------------------------------------------------------------
             recent_minute_spread = (high_intra[-5:] - low_intra[-5:]).mean()
             implied_spread = (recent_minute_spread * 0.15) / current_intraday_price
-            # Allow up to ~0.5% implied spread
             if implied_spread > 0.005:
                 continue
 
             # ----------------------------------------------------------------------
-            # 🚨 GATE 2: THE HIGH PROXIMITY EXTENSION GATE (SOFTENED)
+            # 🚨 GATE 2: HIGH PROXIMITY EXTENSION GATE
+            # Only block names far from the high; keep pullbacks
             # ----------------------------------------------------------------------
             daily_high = float(high_intra.max())
             high_proximity = (daily_high - current_intraday_price) / current_intraday_price
-            # Only block names far from the high; keep pullbacks
             if high_proximity > 0.08:
                 continue
 
             # ----------------------------------------------------------------------
-            # 🚨 GATE 3: THE VWAP SUSTAINABILITY CHECKER (SOFTENED)
+            # 🚨 GATE 3: VWAP SUSTAINABILITY CHECKER
+            # Allow up to ~3% above VWAP; block true blowouts
             # ----------------------------------------------------------------------
             cv_slice = vol_intra * close_intra
             vwap_spot = cv_slice.sum() / vol_intra.sum() if vol_intra.sum() > 0 else current_intraday_price
             vwap_dist_pct = (current_intraday_price - vwap_spot) / vwap_spot
-            # Allow up to ~3% above VWAP; block true blowouts
             if vwap_dist_pct > 0.03:
                 continue
 
@@ -191,7 +209,7 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             low_d = daily_df["Low"].values
 
             # ----------------------------------------------------------------------
-            # 🚨 HARDENED FILTER: CRITERION 1 — THE MULTI-DAY RESISTANCE SHIELD (SOFTENED)
+            # 🚨 MULTI-DAY RESISTANCE SHIELD (soft band)
             # ----------------------------------------------------------------------
             max_5day_overhead_resistance = float(high_d[-6:-1].max()) if len(high_d) >= 6 else float(high_d[0])
             buffer = 0.01 * max_5day_overhead_resistance  # ~1% band
@@ -199,33 +217,35 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 continue
 
             # ----------------------------------------------------------------------
-            # 🚨 HARDENED FILTER: CRITERION 4 — THE 10:30 AM INTRADAY RETEST GATE
+            # 🚨 10:30 AM INTRADAY RETEST GATE
             # ----------------------------------------------------------------------
             morning_high_marker = float(high_intra[:30].max()) if len(high_intra) >= 30 else session_open_price
             if len(high_intra) > 45 and current_intraday_price < morning_high_marker:
                 continue
 
             # ----------------------------------------------------------------------
-            # 🚨 HARDENED FILTER: THE 3% EXHAUSTION CAP GATE (SOFTENED)
+            # 🚨 EXHAUSTION CAP GATE (still caps blowouts)
             # ----------------------------------------------------------------------
             prev_close_d = float(close_d[-2] if len(close_d) >= 2 else current_price)
             today_total_gain_pct = ((current_intraday_price - prev_close_d) / prev_close_d) * 100
-            # Allow strong names up to ~5%; block true blowouts
             if today_total_gain_pct > 5.0:
                 continue
 
             # ----------------------------------------------------------------------
-            # 📈 HARDENED 20-BAR INTRADAY EMA9 VELOCITY FILTER (Smooths Out Noise)
+            # 📈 HARDENED 20-BAR INTRADAY EMA9 VELOCITY FILTER
             # ----------------------------------------------------------------------
             ema9_i_series = intraday_df["Close"].ewm(span=9).mean().values
             if len(ema9_i_series) >= 20:
-                intraday_velocity_slope = float((ema9_i_series[-1] - ema9_i_series[-20]) / ema9_i_series[-20]) * 100
+                intraday_velocity_slope = float(
+                    (ema9_i_series[-1] - ema9_i_series[-20]) / ema9_i_series[-20]
+                ) * 100
             elif len(ema9_i_series) >= 5:
-                intraday_velocity_slope = float((ema9_i_series[-1] - ema9_i_series[-5]) / ema9_i_series[-5]) * 100
+                intraday_velocity_slope = float(
+                    (ema9_i_series[-1] - ema9_i_series[-5]) / ema9_i_series[-5]
+                ) * 100
             else:
                 intraday_velocity_slope = 0.0
 
-            # Realistic continuation thresholds
             if abs(intraday_velocity_slope) < 0.10:
                 intraday_velocity_penalty = -1.0      # mild chop penalty
             elif intraday_velocity_slope > 0.20:
@@ -248,26 +268,47 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
 
             ema9_slope = float(ema9_d[-1] - ema9_d[-5])
             ema20_slope = float(ema20_d[-1] - ema20_d[-5])
-            proximity_metric = abs((ema9_d[-1] - ema20_d[-1]) / (ema20_d[-1] if ema20_d[-1] != 0 else 1.0))
+            proximity_metric = abs(
+                (ema9_d[-1] - ema20_d[-1]) / (ema20_d[-1] if ema20_d[-1] != 0 else 1.0)
+            )
 
+            # ------------------------------------------------------------------
+            # ⭐ NEW: SOFTENED PRICE VS CLOSE CLASSIFICATION
+            # Allow up to ~2% dip vs prior close as "Near Close"
+            # ------------------------------------------------------------------
+            prev_close = float(close_d[-2] if len(close_d) >= 2 else current_price)
+            drop_pct = (prev_close - current_intraday_price) / prev_close if prev_close > 0 else 0.0
+
+            if current_intraday_price > prev_close:
+                price_vs_close = "Above Close"
+            elif drop_pct <= 0.02:
+                price_vs_close = "Near Close"   # up to -2% dip allowed
+            else:
+                price_vs_close = "Below Close"
+
+            # ------------------------------------------------------------------
+            # EXECUTION LOGIC — now aware of "Near Close"
+            # ------------------------------------------------------------------
             if ema9_d[-1] > ema20_d[-1] and ema9_slope > 0 and ema20_slope > 0:
                 execution = "Watch List"
-            elif ema9_d[-1] > ema20_d[-1] and (ema9_slope < 0 or ema20_slope < 0):
-                execution = "Not Watch List"
             elif proximity_metric < 0.003:
                 execution = "Crossing Soon"
-            else:
+            elif price_vs_close == "Near Close" and ema9_d[-1] > ema20_d[-1]:
                 execution = "Setup Only"
+            else:
+                execution = "Not Watch List"
 
             rvol = float(daily_df["Volume"].iloc[-1] / avg_volume_20d) if avg_volume_20d > 0 else 1.0
-            gap_pct = float(((daily_df["Open"].iloc[-1] - close_d[-2]) / close_d[-2]) * 100) if len(close_d) >= 2 else 0.0
+            gap_pct = float(
+                ((daily_df["Open"].iloc[-1] - close_d[-2]) / close_d[-2]) * 100
+            ) if len(close_d) >= 2 else 0.0
             h_l = high_d - low_d
             atr = float(np.mean(h_l[-14:])) if len(h_l) >= 14 else float(h_l[-1])
             atr_pct = (atr / current_price) * 100
 
             pca1_slope = 0.0
             ema_curve = 0.0
-            vwap_dist = 0.0
+            vwap_dist = vwap_dist_pct
             roc_10 = 0.0
             stoch_k = 0.5
 
@@ -276,27 +317,22 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 ema20_i = intraday_df["Close"].ewm(span=20).mean().values
                 ema_curve = float(ema9_i[-1] - ema20_i[-1])
                 pca1_slope = float(ema9_i[-1] - ema9_i[-5])
-                vwap_dist = vwap_dist_pct
 
-            prev_close = float(close_d[-2] if len(close_d) >= 2 else current_price)
-            price_vs_close = "Above Close" if current_intraday_price > prev_close else "Below Close" if current_intraday_price < prev_close else "Equal"
-
-            # Neutral boost placeholder to avoid crash
             ticker_zero_line_boost = 0.0
 
             rows.append({
                 "Ticker": ticker,
                 "Trend": trend,
                 "Universe": get_universe_source(ticker),
-                "Execution": execution,"Close": round(current_price, 2),
-                "Trend": trend,"ATR%": round(atr_pct, 2),
+                "Execution": execution,
+                "Close": round(current_price, 2),
+                "ATR%": round(atr_pct, 2),
                 "RVOL": round(rvol, 2),
                 "Gap%": round(gap_pct, 2),
-                #"Trend": trend,
-                #"Execution": execution,
                 "PCA1": 0.0,
                 "Avg_Volume_20d": avg_volume_20d,
                 "Price_vs_Close": price_vs_close,
+                "Drop_Pct": round(drop_pct * 100, 2),
                 "PCA1_slope": pca1_slope,
                 "EMA_Curve": ema_curve,
                 "VWAP_Dist": vwap_dist,
@@ -379,8 +415,20 @@ def color_execution_column(df):
 # INTERACTIVE FILTERS SIDEBAR
 # ---------------------------------------------------------
 st.markdown("### 🔍 Price Boundaries Filter")
-min_price = st.number_input("Minimum Asset Close Gate Price ($)", value=40.0, min_value=40.0, max_value=110.0, key="intraday_min_price")
-max_price = st.number_input("Maximum Asset Close Gate Price ($)", value=110.0, min_value=40.0, max_value=110.0, key="intraday_max_price")
+min_price = st.number_input(
+    "Minimum Asset Close Gate Price ($)",
+    value=40.0,
+    min_value=40.0,
+    max_value=120.0,
+    key="intraday_min_price"
+)
+max_price = st.number_input(
+    "Maximum Asset Close Gate Price ($)",
+    value=120.0,
+    min_value=40.0,
+    max_value=120.0,
+    key="intraday_max_price"
+)
 
 st.markdown("### 🎛️ Structural Execution Filters")
 execution_filter = st.multiselect(
@@ -391,17 +439,29 @@ execution_filter = st.multiselect(
 )
 
 def render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend):
-    st.metric(label="📊 Active Market Regime Identified", value=f"{regime}", delta=f"S&P500: {sp500_trend} | NASDAQ: {nasdaq_trend}", delta_color="off")
+    st.metric(
+        label="📊 Active Market Regime Identified",
+        value=f"{regime}",
+        delta=f"S&P500: {sp500_trend} | NASDAQ: {nasdaq_trend}",
+        delta_color="off"
+    )
     st.markdown(f"**Structural Tier-1 Premium Universe:** {len(ranking)} premium tokens verified.")
     if filtered is None or filtered.empty:
         st.info("No tickers matched your interactive filter constraints.")
     else:
         display_df = filtered.copy()
         if "Ticker" in display_df.columns and "Universe" in display_df.columns:
-            display_df["Ticker"] = display_df.apply(lambda r: f"{r['Ticker']} ({r['Universe']})", axis=1)
+            display_df["Ticker"] = display_df.apply(
+                lambda r: f"{r['Ticker']} ({r['Universe']})",
+                axis=1
+            )
             display_df = display_df.drop(columns=["Universe"], errors="ignore")
         st.subheader(f"🚀 Actionable Structural Matrix Results — {len(display_df)} Tickers")
-        st.dataframe(display_df.style.apply(color_execution_column, axis=None), hide_index=True, use_container_width=True)
+        st.dataframe(
+            display_df.style.apply(color_execution_column, axis=None),
+            hide_index=True,
+            use_container_width=True
+        )
 
 # ---------------------------------------------------------
 # RUN PART 3 ORCHESTRATION TRIGGER (HARDENED EXCEPTION HANDLED)
@@ -478,3 +538,4 @@ if "intraday_raw_ranking" in st.session_state:
         if execution_filter and "Execution" in filtered.columns:
             filtered = filtered[filtered["Execution"].isin(execution_filter)]
         render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend)
+

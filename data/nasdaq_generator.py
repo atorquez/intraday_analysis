@@ -4,7 +4,7 @@ import os
 # ---------------------------------------------------------
 # CLEAN + PRICE FILTER
 # ---------------------------------------------------------
-def load_and_filter_nasdaq(csv_path, min_price=40, max_price=110):
+def load_and_filter_nasdaq(csv_path, min_price=5, max_price=500):
     """
     Loads NASDAQ full list CSV and filters:
     - common stocks only
@@ -71,7 +71,6 @@ def load_and_filter_nasdaq(csv_path, min_price=40, max_price=110):
 
     return df_filtered.reset_index(drop=True)
 
-
 # ---------------------------------------------------------
 # WRITE PYTHON UNIVERSE FILE
 # ---------------------------------------------------------
@@ -87,13 +86,12 @@ def write_universe_file(tickers, output_path, min_price, max_price):
     print(f"Universe file written → {output_path}")
     print(f"Total tickers: {len(tickers)}")
 
-
 # ---------------------------------------------------------
 # MAIN SCRIPT
 # ---------------------------------------------------------
-def generate_nasdaq_price_universe(min_price=40, max_price=110):
+def generate_nasdaq_price_universe(min_price=5, max_price=500):
     csv_path = "data/nasdaq_full_list.csv"
-    output_path = "data/nasdaq1000_list.py"
+    output_path = "data/nasdaq_list.py"
 
     if not os.path.exists(csv_path):
         print(f"ERROR: File not found → {csv_path}")
@@ -112,4 +110,4 @@ def generate_nasdaq_price_universe(min_price=40, max_price=110):
 
 
 if __name__ == "__main__":
-    generate_nasdaq_price_universe(min_price=40, max_price=110)
+    generate_nasdaq_price_universe(min_price=5, max_price=500)

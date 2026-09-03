@@ -765,15 +765,6 @@ def momentum_rank_universe_batch(
             intraday_total_volume = float(
                 vol_i.sum()
             )
-            #OLD RVOL ==========================================
-            #rvol = (
-            #                float(
-            #                    intraday_total_volume
-            #                    / avg_volume_20d
-            #                )
-            #                if avg_volume_20d > 0
-            #                else 1.0
-            #            )
 
             #NEW RVOL CALCULATION
             # =================================================
@@ -964,12 +955,7 @@ def momentum_rank_universe_batch(
 
                 "Data_As_Of": data_as_of
             })
-
-        #OLD EXCEPT BLOCK
-        #except Exception:
-        #
-        #    continue
-        
+      
         #NEW EXCEPT BLOCK
         except Exception as e:
             print(
@@ -1005,15 +991,15 @@ min_price = st.number_input(
     "Minimum Price ($)",
     value=40.0,
     min_value=40.0,
-    max_value=110.0,
+    max_value=120.0,
     key="momentum_min_price"
 )
 
 max_price = st.number_input(
     "Maximum Price ($)",
-    value=110.0,
+    value=120.0,
     min_value=40.0,
-    max_value=110.0,
+    max_value=120.0,
     key="momentum_max_price"
 )
 
