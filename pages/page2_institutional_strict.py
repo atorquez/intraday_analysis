@@ -476,7 +476,18 @@ if "intraday_raw_ranking" in st.session_state:
     
     if ranking is not None and not ranking.empty:
         filtered = ranking.copy()
+
+        # Price filter
         filtered = filtered[(filtered["Close"] >= min_price) & (filtered["Close"] <= max_price)]
+
+        # Execution filter
         if execution_filter and "Execution" in filtered.columns:
             filtered = filtered[filtered["Execution"].isin(execution_filter)]
+
+        # ⭐ NEW: Sort by Score descending
+        if "Score" in filtered.columns:
+            filtered = filtered.sort_values(by="Score", ascending=False)
+
         render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend)
+    else:
+        st.info("No tickers matched your interactive filter constraints.")

@@ -1,3 +1,4 @@
+#PART 1
 # ==============================================================================
 # 📈 INSTITUTIONAL MODEL
 # SPECIFICATION: PREMIUM UNIVERSE STRUCTURAL TRACKING SYSTEM 
@@ -121,6 +122,7 @@ def compute_recovery_probability(df_daily):
             recoveries += 1
     return float(recoveries / total)
 
+#PART 2
 # ---------------------------------------------------------
 # MASTER VECTORIZED EXTRACTION INTERFACE (DYNAMIC ADAPTIVE VELOCITY HARDENED)
 # ---------------------------------------------------------
@@ -365,8 +367,9 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
 
     return df
 
+#PART 3
 # ---------------------------------------------------------
-# PART 2- REGIME UTILITIES
+# REGIME UTILITIES
 # ---------------------------------------------------------
 def get_index_trend(ticker):
     try:
@@ -525,7 +528,9 @@ if run_model:
         st.error(f"Model execution failed structural compilation: {str(e)}")
         st.exception(e)
 
-# Render results panel safely outside button context
+# ---------------------------------------------------------
+# RENDER RESULTS PANEL (SORTED BY SCORE DESCENDING)
+# ---------------------------------------------------------
 if "intraday_raw_ranking" in st.session_state:
     ranking = st.session_state["intraday_raw_ranking"]
     regime = st.session_state.get("intraday_regime", "Unknown")
@@ -534,8 +539,18 @@ if "intraday_raw_ranking" in st.session_state:
     
     if ranking is not None and not ranking.empty:
         filtered = ranking.copy()
+
+        # Price filter
         filtered = filtered[(filtered["Close"] >= min_price) & (filtered["Close"] <= max_price)]
+
+        # Execution filter
         if execution_filter and "Execution" in filtered.columns:
             filtered = filtered[filtered["Execution"].isin(execution_filter)]
-        render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend)
 
+        # ⭐ NEW: Sort by Score descending
+        if "Score" in filtered.columns:
+            filtered = filtered.sort_values(by="Score", ascending=False)
+
+        render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend)
+    else:
+        st.info("No tickers matched your interactive filter constraints.")
