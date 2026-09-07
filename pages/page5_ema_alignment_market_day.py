@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
-import pytz
+from zoneinfo import ZoneInfo
 
 st.set_page_config(layout="wide", page_title="Institutional EMA Alignment")
 
@@ -108,11 +108,13 @@ def _to_eastern_index(df):
 
     idx = pd.DatetimeIndex(df.index)
 
+    eastern = ZoneInfo("America/New_York")
+
     if idx.tz is not None:
-        idx = idx.tz_convert("US/Eastern")
+        idx = idx.tz_convert(eastern)
 
     else:
-        idx = idx.tz_localize("US/Eastern")
+        idx = idx.tz_localize(eastern)
 
     df.index = idx
 
@@ -1448,13 +1450,9 @@ if run_model:
 
         start_time = time.time()
 
-        eastern = pytz.timezone(
-            "US/Eastern"
-        )
+        eastern = ZoneInfo("America/New_York")
 
-        now_est = datetime.now(
-            eastern
-        )
+        now_est = datetime.now(eastern)
 
 
         # ----------------------------------------------------

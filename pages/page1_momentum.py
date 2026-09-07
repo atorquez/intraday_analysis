@@ -997,9 +997,9 @@ min_price = st.number_input(
 
 max_price = st.number_input(
     "Maximum Price ($)",
-    value=120.0,
+    value=500.0,
     min_value=40.0,
-    max_value=120.0,
+    max_value=500.0,
     key="momentum_max_price"
 )
 
