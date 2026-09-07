@@ -14,6 +14,8 @@
 # - Uses EMA9 / EMA20 structure and short-term price behavior.
 # - Designed as an early structural candidate detector.
 # ==============================================================================
+import importlib
+
 import streamlit as st
 import time
 import numpy as np
@@ -127,13 +129,92 @@ def _to_eastern_index(df):
 def _load_universe():
 
     try:
-        from utils.data_fetch import load_universe
+        import inspect
+        import sys
+        import importlib
+        import utils.data_fetch as data_fetch_module
+        import data.us_universe_list as universe_module
+
+        # ----------------------------------------------------
+        # TEMPORARY FORCE RELOAD
+        # ----------------------------------------------------
+
+        universe_module = importlib.reload(universe_module)
+        data_fetch_module = importlib.reload(data_fetch_module)
+
+        # Get load_universe AFTER reloading data_fetch
+        load_universe = data_fetch_module.load_universe
+
+        # ----------------------------------------------------
+        # UNIVERSE SOURCE DIAGNOSTIC
+        # ----------------------------------------------------
+
+        st.write("### 🔎 Universe Source Diagnostic")
+
+        # ----------------------------------------------------
+        # UNIVERSE SOURCE DIAGNOSTIC
+        # ----------------------------------------------------
+
+        st.write("### 🔎 Universe Source Diagnostic")
+
+        st.write("### 🐍 PYTHON ENVIRONMENT")
+
+        st.write(
+            f"Python executable: `{sys.executable}`"
+        )
+
+        st.write(
+            f"Python version: `{sys.version}`"
+        )
+
+        st.write(
+            f"Page 5 file: **{__file__}**"
+        )
+
+        st.write(
+            f"data_fetch file: **{data_fetch_module.__file__}**"
+        )
+
+        st.write(
+            f"us_universe file: **{universe_module.__file__}**"
+        )
+
+        direct_count = len(universe_module.us_universe)
+
+        st.write(
+            f"Direct us_universe length: **{direct_count:,}**"
+        )
+
+        # ----------------------------------------------------
+        # LOAD UNIVERSE
+        # ----------------------------------------------------
 
         tickers = load_universe()
 
         if tickers is None:
             st.error("load_universe() returned None.")
             return []
+
+        st.write(
+            f"load_universe() length: **{len(tickers):,}**"
+        )
+
+        # ----------------------------------------------------
+        # SHOW FUNCTION SOURCE
+        # ----------------------------------------------------
+
+        st.write(
+            "load_universe source:"
+        )
+
+        st.code(
+            inspect.getsource(load_universe),
+            language="python"
+        )
+
+        # ----------------------------------------------------
+        # NORMALIZE
+        # ----------------------------------------------------
 
         normalized_tickers = sorted(
             set(
@@ -143,17 +224,22 @@ def _load_universe():
             )
         )
 
+        st.write(
+            f"Normalized universe length: "
+            f"**{len(normalized_tickers):,}**"
+        )
+
         return normalized_tickers
 
     except Exception as e:
+
         st.error(
             "Unable to load the master US universe "
             "from utils/data_fetch.py: "
             f"{e}"
         )
+
         return []
-
-
 # ============================================================
 # MARKET DATA
 # ============================================================
@@ -1497,21 +1583,17 @@ if run_model:
             + " EST**"
         )
 
-
         # ----------------------------------------------------
         # LOAD UNIVERSE
         # ----------------------------------------------------
 
         universe_list = _load_universe()
 
-
         if not universe_list:
 
             st.error(
-
                 "The stock universe could not "
                 "be loaded. "
-
                 "Check data/us_universe_list.py "
                 "and utils/data_fetch.py."
             )
@@ -1519,12 +1601,42 @@ if run_model:
             st.stop()
 
 
-        st.write(
+        # ----------------------------------------------------
+        # TEMPORARY UNIVERSE TRACE
+        # ----------------------------------------------------
 
+        st.write("### 🔎 UNIVERSE TRACE")
+
+        st.write(
+            f"Page 5 executing file: `{__file__}`"
+        )
+
+        st.write(
+            f"Universe variable type: `{type(universe_list)}`"
+        )
+
+        st.write(
+            f"Universe variable length: "
+            f"**{len(universe_list):,}**"
+        )
+
+        st.write(
+            f"First 10 tickers: `{universe_list[:10]}`"
+        )
+
+        st.write(
+            f"Last 10 tickers: `{universe_list[-10:]}`"
+        )
+
+
+        # ----------------------------------------------------
+        # MASTER UNIVERSE COUNT
+        # ----------------------------------------------------
+
+        st.write(
             f"Master Universe loaded: "
             f"**{len(universe_list):,} tickers**"
         )
-
 
         # ----------------------------------------------------
         # DOWNLOAD DATA
