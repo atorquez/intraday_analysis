@@ -54,7 +54,7 @@ def load_and_filter_all_sources(csv_paths, min_price=40, max_price=120):
     return pd.concat(combined_dfs, ignore_index=True)
 
 
-def generate_master_universe(min_price=40, max_price=12):
+def generate_master_universe(min_price=40, max_price=120):
     # INSTRUCTION: Simply add your source data file paths to this list
     source_files = [
         "data/nasdaq_full_list.csv",

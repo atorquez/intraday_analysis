@@ -1,7 +1,6 @@
 # ==============================================================================
-# 💹 INSTITUTIONAL DIP-BUY MODEL (PAGE 3)
-# SPEC: Uses Page2 backbone, but targets intraday dips with upward momentum
-# ==============================================================================
+# 💹 INSTITUTIONAL DIP-BUY MODEL
+# # ==============================================================================
 import streamlit as st
 
 st.set_page_config(layout="wide", page_title="Institutional Dip-Buy Model")
@@ -82,7 +81,7 @@ def to_scalar(x):
             return float("nan")
 
 # ---------------------------------------------------------
-# PAGE 3 CORE: DIP-BUY RANKER
+# CORE: DIP-BUY RANKER
 # ---------------------------------------------------------
 def local_rank_dip_buy_universe(tickers, batch_daily, batch_intra, min_price, max_price):
     rows = []
