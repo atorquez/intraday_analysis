@@ -15,7 +15,6 @@
 # - Designed as an early structural candidate detector.
 # ==============================================================================
 import importlib
-
 import streamlit as st
 import time
 import numpy as np
@@ -43,7 +42,6 @@ MIN_INTRADAY_BARS = 5
 MIN_REAL_DAY_BARS = 10
 MIN_AVG_VOLUME_20D = 250000
 
-
 # ============================================================
 # SESSION STATE
 # ============================================================
@@ -53,7 +51,6 @@ if "ema_alignment_raw_ranking" not in st.session_state:
 
 if "ema_alignment_rejections" not in st.session_state:
     st.session_state["ema_alignment_rejections"] = pd.DataFrame()
-
 
 # ============================================================
 # DATAFRAME HELPERS
@@ -87,7 +84,6 @@ def _flatten_columns(df):
                 df.columns = level_1
 
     return df
-
 
 def _extract_ticker_slice(batch, ticker):
 
@@ -144,12 +140,6 @@ def _load_universe():
 
         # Get load_universe AFTER reloading data_fetch
         load_universe = data_fetch_module.load_universe
-
-        # ----------------------------------------------------
-        # UNIVERSE SOURCE DIAGNOSTIC
-        # ----------------------------------------------------
-
-        st.write("### 🔎 Universe Source Diagnostic")
 
         # ----------------------------------------------------
         # UNIVERSE SOURCE DIAGNOSTIC
@@ -240,6 +230,7 @@ def _load_universe():
         )
 
         return []
+
 # ============================================================
 # MARKET DATA
 # ============================================================
@@ -284,7 +275,6 @@ def fetch_clean_market_batch(tickers_tuple):
 
         return pd.DataFrame(), pd.DataFrame()
 
-
 # ============================================================
 # PRICE INCREASE SCORE
 # ============================================================
@@ -311,7 +301,6 @@ def price_increase_score(price_increase_pct):
 
     return 0
 
-
 def price_increase_label(score):
 
     return {
@@ -323,7 +312,6 @@ def price_increase_label(score):
         int(score),
         "Weak"
     )
-
 
 # ============================================================
 # DISPLAY COLORING
@@ -441,7 +429,6 @@ def color_score_columns(df):
 
     return style
 
-
 # ============================================================
 # REJECTION ROW TEMPLATE
 # ============================================================
@@ -493,7 +480,6 @@ def _rejection_row(
         "Latest_Real_Day": "N/A"
     }
 
-
 # ============================================================
 # EMA ALIGNMENT ENGINE
 # ============================================================
@@ -509,7 +495,6 @@ def ema_alignment_engine(
     rows = []
 
     rejection_rows = []
-
 
     # ========================================================
     # NO DAILY DATA
@@ -531,7 +516,6 @@ def ema_alignment_engine(
             pd.DataFrame(rejection_rows)
         )
 
-
     # ========================================================
     # NO INTRADAY DATA
     # ========================================================
@@ -551,7 +535,6 @@ def ema_alignment_engine(
             pd.DataFrame(),
             pd.DataFrame(rejection_rows)
         )
-
 
     # ========================================================
     # DETERMINE AVAILABLE TICKERS
@@ -579,7 +562,6 @@ def ema_alignment_engine(
             set(tickers)
         )
 
-
     # ========================================================
     # TICKERS MISSING FROM YAHOO DATA
     # ========================================================
@@ -599,7 +581,6 @@ def ema_alignment_engine(
 
         rejection_rows.append(r)
 
-
     # ========================================================
     # PROCESS EACH TICKER
     # ========================================================
@@ -607,7 +588,6 @@ def ema_alignment_engine(
     for ticker in active_pool:
 
         r = _rejection_row(ticker)
-
 
         # ----------------------------------------------------
         # EXTRACT DATA
@@ -640,7 +620,6 @@ def ema_alignment_engine(
             else "Missing"
         )
 
-
         # ----------------------------------------------------
         # EMPTY DATA
         # ----------------------------------------------------
@@ -653,7 +632,6 @@ def ema_alignment_engine(
 
             continue
 
-
         if intraday_df.empty:
 
             r["Reason"] = "Intraday data empty"
@@ -661,7 +639,6 @@ def ema_alignment_engine(
             rejection_rows.append(r)
 
             continue
-
 
         # ----------------------------------------------------
         # REQUIRED COLUMNS
@@ -677,7 +654,6 @@ def ema_alignment_engine(
 
             continue
 
-
         if "Close" not in intraday_df.columns:
 
             r["Reason"] = (
@@ -687,7 +663,6 @@ def ema_alignment_engine(
             rejection_rows.append(r)
 
             continue
-
 
         # ----------------------------------------------------
         # CLEAN CLOSE DATA
@@ -710,7 +685,6 @@ def ema_alignment_engine(
             f"OK ({len(intraday_df)} rows)"
         )
 
-
         # ----------------------------------------------------
         # DAILY HISTORY
         # ----------------------------------------------------
@@ -726,7 +700,6 @@ def ema_alignment_engine(
 
             continue
 
-
         # ----------------------------------------------------
         # CONVERT INTRADAY TO EASTERN
         # ----------------------------------------------------
@@ -734,7 +707,6 @@ def ema_alignment_engine(
         intraday_df = _to_eastern_index(
             intraday_df
         ).sort_index()
-
 
         # ----------------------------------------------------
         # REGULAR SESSION ONLY
@@ -745,7 +717,6 @@ def ema_alignment_engine(
             "16:00"
         )
 
-
         if intraday_df.empty:
 
             r["Reason"] = (
@@ -755,7 +726,6 @@ def ema_alignment_engine(
             rejection_rows.append(r)
 
             continue
-
 
         # ----------------------------------------------------
         # FIND REAL TRADING DAY
@@ -772,7 +742,6 @@ def ema_alignment_engine(
             ].index
         )
 
-
         if not eligible_days:
 
             r["Reason"] = (
@@ -784,9 +753,7 @@ def ema_alignment_engine(
 
             continue
 
-
         latest_real_day = eligible_days[-1]
-
 
         intraday_df = intraday_df[
             intraday_df.index.date
@@ -798,7 +765,6 @@ def ema_alignment_engine(
             latest_real_day
         )
 
-
         if len(intraday_df) < MIN_REAL_DAY_BARS:
 
             r["Reason"] = (
@@ -809,7 +775,6 @@ def ema_alignment_engine(
             rejection_rows.append(r)
 
             continue
-
 
         # ----------------------------------------------------
         # INTRADAY CLOSE ARRAY
@@ -825,7 +790,6 @@ def ema_alignment_engine(
             .astype(float)
         )
 
-
         if len(close_raw) < MIN_INTRADAY_BARS:
 
             r["Reason"] = (
@@ -836,7 +800,6 @@ def ema_alignment_engine(
             rejection_rows.append(r)
 
             continue
-
 
         # ----------------------------------------------------
         # CURRENT INTRADAY PRICE
@@ -851,7 +814,6 @@ def ema_alignment_engine(
             2
         )
 
-
         if not np.isfinite(
             current_price
         ):
@@ -863,7 +825,6 @@ def ema_alignment_engine(
             rejection_rows.append(r)
 
             continue
-
 
         # ====================================================
         # PRICE FILTER
@@ -883,7 +844,6 @@ def ema_alignment_engine(
 
             continue
 
-
         # ====================================================
         # VOLUME FILTER
         # ====================================================
@@ -898,7 +858,6 @@ def ema_alignment_engine(
 
             continue
 
-
         vol_d = (
             pd.to_numeric(
                 daily_df["Volume"],
@@ -908,7 +867,6 @@ def ema_alignment_engine(
             .values
             .astype(float)
         )
-
 
         if len(vol_d) < 20:
 
@@ -921,19 +879,16 @@ def ema_alignment_engine(
 
             continue
 
-
         avg_volume_20d = float(
             np.mean(
                 vol_d[-20:]
             )
         )
 
-
         r["Avg_Volume_20d"] = round(
             avg_volume_20d,
             0
         )
-
 
         if (
             not np.isfinite(avg_volume_20d)
@@ -948,7 +903,6 @@ def ema_alignment_engine(
             rejection_rows.append(r)
 
             continue
-
 
         # ====================================================
         # EMA CALCULATIONS
@@ -965,7 +919,6 @@ def ema_alignment_engine(
             .astype(float)
         )
 
-
         ema20_i = (
             intraday_df["Close"]
             .ewm(
@@ -976,7 +929,6 @@ def ema_alignment_engine(
             .values
             .astype(float)
         )
-
 
         if len(close_raw) < 5:
 
@@ -989,7 +941,6 @@ def ema_alignment_engine(
 
             continue
 
-
         # ----------------------------------------------------
         # CURRENT EMA VALUES
         # ----------------------------------------------------
@@ -1001,7 +952,6 @@ def ema_alignment_engine(
         ema20_now = float(
             ema20_i[-1]
         )
-
 
         # ----------------------------------------------------
         # EMA SLOPES
@@ -1017,7 +967,6 @@ def ema_alignment_engine(
             - ema20_i[-5]
         )
 
-
         # ====================================================
         # LAST 5 BARS
         # ====================================================
@@ -1025,7 +974,6 @@ def ema_alignment_engine(
         last5 = close_raw[-5:]
 
         last5_ema9 = ema9_i[-5:]
-
 
         # ----------------------------------------------------
         # PRICE INCREASE
@@ -1045,11 +993,9 @@ def ema_alignment_engine(
             else 0.0
         )
 
-
         p_score = price_increase_score(
             price_increase_pct
         )
-
 
         # ====================================================
         # EMA CONDITIONS
@@ -1059,26 +1005,21 @@ def ema_alignment_engine(
             current_price > ema9_now
         )
 
-
         cond_price_above_ema20 = (
             current_price > ema20_now
         )
-
 
         cond_ema9_above_ema20 = (
             ema9_now > ema20_now
         )
 
-
         cond_ema9_slope_pos = (
             ema9_slope > 0
         )
 
-
         cond_ema20_slope_pos = (
             ema20_slope > 0
         )
-
 
         cond_last5_above_ema9 = bool(
             np.all(
@@ -1086,16 +1027,13 @@ def ema_alignment_engine(
             )
         )
 
-
         cond_lastbar_higher_3 = bool(
             last5[-1] > last5[-3]
         )
 
-
         cond_lastbar_higher_4 = bool(
             last5[-1] > last5[-4]
         )
-
 
         # ====================================================
         # EMA ALIGNMENT SCORE
@@ -1103,26 +1041,20 @@ def ema_alignment_engine(
 
         ema_score = 0
 
-
         if cond_price_above_ema9:
             ema_score += 2
-
 
         if cond_price_above_ema20:
             ema_score += 2
 
-
         if cond_ema9_above_ema20:
             ema_score += 2
-
 
         if cond_ema9_slope_pos:
             ema_score += 1
 
-
         if cond_ema20_slope_pos:
             ema_score += 1
-
 
         # ====================================================
         # STORE DIAGNOSTIC CONDITIONS
@@ -1199,13 +1131,11 @@ def ema_alignment_engine(
                 )
         })
 
-
         # ====================================================
         # DETERMINE FAILED HARD CONDITIONS
         # ====================================================
 
         failed = []
-
 
         if ema_score < 4:
 
@@ -1213,13 +1143,11 @@ def ema_alignment_engine(
                 "EMA score < 4/8"
             )
 
-
         if not cond_last5_above_ema9:
 
             failed.append(
                 "not all last 5 closes > EMA9"
             )
-
 
         if not cond_lastbar_higher_3:
 
@@ -1227,13 +1155,11 @@ def ema_alignment_engine(
                 "latest bar <= bar -3"
             )
 
-
         if not cond_lastbar_higher_4:
 
             failed.append(
                 "latest bar <= bar -4"
             )
-
 
         # ====================================================
         # REJECTED
@@ -1249,7 +1175,6 @@ def ema_alignment_engine(
 
             continue
 
-
         # ====================================================
         # QUALIFIED
         # ====================================================
@@ -1261,7 +1186,6 @@ def ema_alignment_engine(
             )
             .dropna()
         )
-
 
         if len(close_daily) >= 2:
 
@@ -1288,7 +1212,6 @@ def ema_alignment_engine(
         else:
 
             gap_vs_prev_close = 0.0
-
 
         rows.append({
 
@@ -1374,7 +1297,6 @@ def ema_alignment_engine(
                 )
         })
 
-
         # Also put qualified ticker in diagnostics
         r["Status"] = "QUALIFIED"
 
@@ -1385,7 +1307,6 @@ def ema_alignment_engine(
 
         rejection_rows.append(r)
 
-
     # ========================================================
     # RANKING DATAFRAME
     # ========================================================
@@ -1393,7 +1314,6 @@ def ema_alignment_engine(
     ranking = pd.DataFrame(
         rows
     )
-
 
     if not ranking.empty:
 
@@ -1415,7 +1335,6 @@ def ema_alignment_engine(
             drop=True
         )
 
-
     # ========================================================
     # REJECTION DATAFRAME
     # ========================================================
@@ -1423,7 +1342,6 @@ def ema_alignment_engine(
     rejections = pd.DataFrame(
         rejection_rows
     )
-
 
     if not rejections.empty:
 
@@ -1443,12 +1361,10 @@ def ema_alignment_engine(
             drop=True
         )
 
-
     return (
         ranking,
         rejections
     )
-
 
 # ============================================================
 # USER FILTERS
@@ -1457,7 +1373,6 @@ def ema_alignment_engine(
 st.markdown(
     "### 🔍 Price Boundaries Filter"
 )
-
 
 min_price = st.number_input(
 
@@ -1472,7 +1387,6 @@ min_price = st.number_input(
     key="ema_alignment_min_price"
 )
 
-
 max_price = st.number_input(
 
     "Maximum Price ($)",
@@ -1486,7 +1400,6 @@ max_price = st.number_input(
     key="ema_alignment_max_price"
 )
 
-
 # ============================================================
 # PRICE SCORE INFORMATION
 # ============================================================
@@ -1494,7 +1407,6 @@ max_price = st.number_input(
 st.markdown(
     "### 🎯 Price Increase Reference"
 )
-
 
 st.caption(
 
@@ -1511,7 +1423,6 @@ st.caption(
     "over the last 5 one-minute bars."
 )
 
-
 # ============================================================
 # RUN BUTTON
 # ============================================================
@@ -1522,7 +1433,6 @@ run_model = st.button(
 
     key="ema_alignment_run_button"
 )
-
 
 # ============================================================
 # RUN MODEL
@@ -1539,7 +1449,6 @@ if run_model:
         eastern = ZoneInfo("America/New_York")
 
         now_est = datetime.now(eastern)
-
 
         # ----------------------------------------------------
         # WEEKEND PROTECTION
@@ -1568,7 +1477,6 @@ if run_model:
             ] = pd.DataFrame()
 
             st.stop()
-
 
         # ----------------------------------------------------
         # EXECUTION TIME
@@ -1600,7 +1508,6 @@ if run_model:
 
             st.stop()
 
-
         # ----------------------------------------------------
         # TEMPORARY UNIVERSE TRACE
         # ----------------------------------------------------
@@ -1628,7 +1535,6 @@ if run_model:
             f"Last 10 tickers: `{universe_list[-10:]}`"
         )
 
-
         # ----------------------------------------------------
         # MASTER UNIVERSE COUNT
         # ----------------------------------------------------
@@ -1652,13 +1558,11 @@ if run_model:
             )
         )
 
-
         raw_daily, raw_intra = (
             fetch_clean_market_batch(
                 tuple(universe_list)
             )
         )
-
 
         if (
             raw_daily is None
@@ -1675,7 +1579,6 @@ if run_model:
 
             st.stop()
 
-
         # ----------------------------------------------------
         # RUN ENGINE
         # ----------------------------------------------------
@@ -1690,7 +1593,6 @@ if run_model:
                 "diagnostics..."
             )
         )
-
 
         ranking, rejections = (
             ema_alignment_engine(
@@ -1707,7 +1609,6 @@ if run_model:
             )
         )
 
-
         progress.progress(
 
             0.9,
@@ -1717,9 +1618,7 @@ if run_model:
             )
         )
 
-
         progress.empty()
-
 
         # ----------------------------------------------------
         # SAVE RESULTS
@@ -1729,11 +1628,9 @@ if run_model:
             "ema_alignment_raw_ranking"
         ] = ranking
 
-
         st.session_state[
             "ema_alignment_rejections"
         ] = rejections
-
 
         # ----------------------------------------------------
         # RUNTIME
@@ -1745,7 +1642,6 @@ if run_model:
             f"**{time.time() - start_time:.2f} seconds**"
         )
 
-
     except Exception as e:
 
         st.error(
@@ -1753,7 +1649,6 @@ if run_model:
         )
 
         st.exception(e)
-
 
 # ============================================================
 # GET RESULTS FROM SESSION STATE
@@ -1766,14 +1661,12 @@ ranking = st.session_state.get(
     pd.DataFrame()
 )
 
-
 rejections = st.session_state.get(
 
     "ema_alignment_rejections",
 
     pd.DataFrame()
 )
-
 
 # ============================================================
 # QUALIFIED RESULTS
@@ -1801,7 +1694,6 @@ if (
         f"{len(display_df)} Tickers"
     )
 
-
     st.dataframe(
 
         display_df.style.apply(
@@ -1814,7 +1706,6 @@ if (
         use_container_width=True
     )
 
-
     # --------------------------------------------------------
     # PRICE SCORE EXPLANATION
     # --------------------------------------------------------
@@ -1822,7 +1713,6 @@ if (
     st.markdown(
         "### 🧭 How to read Price Increase Score"
     )
-
 
     st.write(
 
@@ -1836,7 +1726,6 @@ if (
         "It is **NOT a rejection filter**."
     )
 
-
 # ============================================================
 # REJECTION DIAGNOSTICS
 # ============================================================
@@ -1844,7 +1733,6 @@ if (
 st.markdown(
     "### 🧪 Rejection Diagnostics"
 )
-
 
 st.caption(
 
@@ -1854,7 +1742,6 @@ st.caption(
     "against the exact conditions used by "
     "the model."
 )
-
 
 if (
     rejections is not None
@@ -1902,7 +1789,6 @@ if (
         "Latest_Real_Day"
     ]
 
-
     diag_cols = [
 
         c
@@ -1912,7 +1798,6 @@ if (
         if c in rejections.columns
     ]
 
-
     st.dataframe(
 
         rejections[diag_cols],
@@ -1921,7 +1806,6 @@ if (
 
         use_container_width=True
     )
-
 
     # ========================================================
     # INDIVIDUAL TICKER DIAGNOSTIC
@@ -1943,7 +1827,6 @@ if (
         key="ema_alignment_rejection_ticker"
     )
 
-
     if diagnostic_ticker:
 
         row = rejections[
@@ -1961,7 +1844,6 @@ if (
             f"#### 🔎 {diagnostic_ticker}"
         )
 
-
         st.write(
 
             f"**Status:** "
@@ -1975,13 +1857,11 @@ if (
             f"{row['Reason']}"
         )
 
-
         st.write(
 
             f"**Latest real trading day:** "
             f"{row['Latest_Real_Day']}"
         )
-
 
         st.write(
 
@@ -1989,13 +1869,11 @@ if (
             f"{row['Price']}"
         )
 
-
         st.write(
 
             f"**EMA Alignment Score:** "
             f"{row['EMA_Score']} / 8"
         )
-
 
         st.write(
 
@@ -2003,18 +1881,15 @@ if (
             f"{row['Price_Increase_%_5Bars']}%"
         )
 
-
         st.write(
 
             f"**Price Increase Score:** "
             f"{row['Price_Increase_Score']}"
         )
 
-
         st.write(
             "**Condition results:**"
         )
-
 
         conditions = {
 
@@ -2059,7 +1934,6 @@ if (
                 ]
         }
 
-
         for name, result in conditions.items():
 
             st.write(
@@ -2067,7 +1941,6 @@ if (
                 f"- **{name}:** "
                 f"{result}"
             )
-
 
 # ============================================================
 # NO RESULTS
