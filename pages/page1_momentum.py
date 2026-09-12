@@ -1,42 +1,70 @@
-#PART 1
+# ==============================================================================
+# 🚀 UNIVERSAL MOMENTUM SCANNER — IMPROVED
+# Version: 2026-09-12
+#
+# DESIGN PRINCIPLE:
+#   The model identifies and ranks opportunities.
+#   Execution validates the opportunity and manages the trade.
+#
+# IMPORTANT:
+#   This version intentionally removes the old Profit Target / Price Position /
+#   Exit Signal framework. The scanner does not assume an entry price and does
+#   not generate an automatic profit target or exit decision.
+#
+# CORE SIGNALS RETAINED:
+#   - EMA9 velocity
+#   - Time-of-day adjusted RVOL
+#   - Momentum Score (0-8)
+#   - Continuation Score (0-16)
+#   - Intraday range expansion
+#   - Float / Market Cap
+#   - VWAP
+#   - Current intraday price
+#   - Current intraday data timestamp
+#
+# IMPROVEMENTS:
+#   1. Removed Profit Target / Exit / assumed-entry tracking.
+#   2. Standardized EMA9 to adjust=False.
+#   3. Added 5-bar actual price movement as an informational signal.
+#      It does NOT change the Momentum Score.
+#   4. Uses America/New_York timezone.
+#   5. Timeline records scanner observations only; it does not pretend that
+#      the scanner price was the trader's actual entry price.
+# ==============================================================================
+
 import streamlit as st
 import time
 import numpy as np
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, date
-import pytz
+from zoneinfo import ZoneInfo
 
-# =========================================================
+# ==============================================================================
 # PAGE CONFIG
-# =========================================================
+# ==============================================================================
 st.set_page_config(
     layout="wide",
     page_title="Momentum Model"
 )
 
+EST = ZoneInfo("America/New_York")
+
 st.caption(
-    "Version: 2026-08-24 — Momentum + Price Position + "
-    "Profit Target + Continuation Score"
+    "Version: 2026-09-12 — Momentum + Continuation + Actual Price Movement"
 )
 
 st.title("🚀 Universal Momentum Scanner — With Continuation Probability")
 
-# =========================================================
+st.info(
+    "Model role: identify and rank opportunities. "
+    "Execution role: validate price action, volume, spread, RSI, VWAP, "
+    "resistance, market conditions, entry, stop and exit."
+)
+
+# ==============================================================================
 # SESSION STATE
-# =========================================================
-if "entry_prices" not in st.session_state:
-    st.session_state["entry_prices"] = {}
-
-if "stop_limits" not in st.session_state:
-    st.session_state["stop_limits"] = {}
-
-if "safe_thresholds" not in st.session_state:
-    st.session_state["safe_thresholds"] = {}
-
-if "profit_targets" not in st.session_state:
-    st.session_state["profit_targets"] = {}
-
+# ==============================================================================
 if "momentum_history" not in st.session_state:
     st.session_state["momentum_history"] = []
 
@@ -46,84 +74,15 @@ if "momentum_history_date" not in st.session_state:
 if "momentum_raw_ranking" not in st.session_state:
     st.session_state["momentum_raw_ranking"] = pd.DataFrame()
 
-# =========================================================
-# PRICE POSITION + PROFIT TARGET LOGIC
-# =========================================================
-def compute_price_position(entry_price, current_price):
-
-    if entry_price is None or current_price is None:
-        return "UNKNOWN"
-
-    if not np.isfinite(entry_price) or not np.isfinite(current_price):
-        return "UNKNOWN"
-
-    safe_threshold = entry_price * 1.0005
-    stop_limit = entry_price * 0.9995
-
-    if current_price <= stop_limit:
-        return "STOP"
-
-    elif current_price < entry_price:
-        return "DANGER"
-
-    elif current_price <= safe_threshold:
-        return "CAUTION"
-
-    else:
-        return "SAFE"
-
-# =========================================================
-# PROFIT TARGET
-# =========================================================
-def compute_profit_target(entry_price, pct=0.015):
-
-    if entry_price is None:
-        return None
-
-    if not np.isfinite(entry_price):
-        return None
-
-    return entry_price * (1.0 + pct)
-
-# =========================================================
-# EXIT SIGNAL
-# =========================================================
-def compute_exit_signal(entry_price, current_price):
-
-    if entry_price is None or current_price is None:
-        return "HOLD"
-
-    if not np.isfinite(entry_price) or not np.isfinite(current_price):
-        return "HOLD"
-
-    stop_limit = entry_price * 0.9995
-    profit_target = compute_profit_target(
-        entry_price,
-        pct=0.015
-    )
-
-    if profit_target is None:
-        return "HOLD"
-
-    if current_price >= profit_target:
-        return "EXIT_PROFIT"
-
-    elif current_price <= stop_limit:
-        return "EXIT_STOP"
-
-    else:
-        return "HOLD"
-
-# =========================================================
+# ==============================================================================
 # CONTINUATION SCORE
 #
 # A = Float
 # B = Market Cap
 # C = RVOL / Float
 # D = Intraday Range Expansion
-#
 # Maximum = 16
-# =========================================================
+# ==============================================================================
 def continuation_score(
     float_val,
     market_cap,
@@ -131,9 +90,6 @@ def continuation_score(
     range_pct
 ):
 
-    # -----------------------------------------------------
-    # Validate inputs
-    # -----------------------------------------------------
     try:
         float_val = float(float_val)
         market_cap = float(market_cap)
@@ -142,103 +98,101 @@ def continuation_score(
     except (TypeError, ValueError):
         return 0
 
-    # -----------------------------------------------------
-    # Invalid float
-    # -----------------------------------------------------
-    if (
-        not np.isfinite(float_val)
-        or float_val <= 0
-    ):
+    # --------------------------------------------------------------------------
+    # A — Public Float Score
+    # --------------------------------------------------------------------------
+    if not np.isfinite(float_val) or float_val <= 0:
         A = 0
         C = 0
     else:
-
-        # -------------------------------------------------
-        # A — Public Float Score
-        # -------------------------------------------------
         if float_val < 50_000_000:
             A = 4
-
         elif float_val < 150_000_000:
             A = 3
-
         elif float_val < 300_000_000:
             A = 2
-
         else:
             A = 1
 
-        # -------------------------------------------------
+        # ----------------------------------------------------------------------
         # C — RVOL / Float Score
-        # -------------------------------------------------
+        # ----------------------------------------------------------------------
         float_millions = float_val / 1_000_000
 
         if float_millions > 0:
-
             ratio = rvol / float_millions
 
             if ratio > 0.20:
                 C = 4
-
             elif ratio > 0.10:
                 C = 3
-
             elif ratio > 0.05:
                 C = 2
-
             else:
                 C = 1
-
         else:
             C = 0
 
-    # -----------------------------------------------------
+    # --------------------------------------------------------------------------
     # B — Market Cap Score
-    # -----------------------------------------------------
-    if (
-        not np.isfinite(market_cap)
-        or market_cap <= 0
-    ):
+    # --------------------------------------------------------------------------
+    if not np.isfinite(market_cap) or market_cap <= 0:
         B = 0
-
     elif market_cap < 5_000_000_000:
         B = 4
-
     elif market_cap < 20_000_000_000:
         B = 3
-
     elif market_cap < 50_000_000_000:
         B = 2
-
     else:
         B = 1
 
-    # -----------------------------------------------------
+    # --------------------------------------------------------------------------
     # D — Intraday Range Expansion
-    # -----------------------------------------------------
-    if (
-        not np.isfinite(range_pct)
-        or range_pct < 0
-    ):
+    # --------------------------------------------------------------------------
+    if not np.isfinite(range_pct) or range_pct < 0:
         D = 0
-
     elif range_pct > 2.0:
         D = 4
-
     elif range_pct > 1.2:
         D = 3
-
     elif range_pct > 0.8:
         D = 2
-
     else:
         D = 1
 
     return A + B + C + D
 
-# =========================================================
+
+# ==============================================================================
+# ACTUAL SHORT-TERM PRICE MOVEMENT
+#
+# This is deliberately informational/ranking-only.
+# It does NOT alter Momentum Score.
+# ==============================================================================
+def price_movement_score(price_change_pct):
+
+    try:
+        pct = float(price_change_pct)
+    except (TypeError, ValueError):
+        return 0
+
+    if not np.isfinite(pct):
+        return 0
+
+    if pct >= 1.00:
+        return 3
+    elif pct >= 0.50:
+        return 2
+    elif pct >= 0.25:
+        return 1
+    else:
+        return 0
+
+
+# ==============================================================================
 # COLOR CODING — CONTINUATION SCORE
-# =========================================================
+# ==============================================================================
 def color_continuation(df):
 
     style_df = pd.DataFrame(
@@ -251,7 +205,6 @@ def color_continuation(df):
         return style_df
 
     for i in range(len(df)):
-
         score = df.iloc[i]["Continuation_Score"]
 
         try:
@@ -260,7 +213,6 @@ def color_continuation(df):
             continue
 
         if score >= 14:
-
             style_df.loc[
                 df.index[i],
                 "Continuation_Score"
@@ -269,9 +221,7 @@ def color_continuation(df):
                 "color:white;"
                 "font-weight:bold;"
             )
-
         elif score >= 10:
-
             style_df.loc[
                 df.index[i],
                 "Continuation_Score"
@@ -280,9 +230,7 @@ def color_continuation(df):
                 "color:black;"
                 "font-weight:bold;"
             )
-
         elif score >= 7:
-
             style_df.loc[
                 df.index[i],
                 "Continuation_Score"
@@ -291,9 +239,7 @@ def color_continuation(df):
                 "color:black;"
                 "font-weight:bold;"
             )
-
         else:
-
             style_df.loc[
                 df.index[i],
                 "Continuation_Score"
@@ -305,10 +251,11 @@ def color_continuation(df):
 
     return style_df
 
-# =========================================================
-# COLOR CODING — PRICE POSITION
-# =========================================================
-def color_price_position(df):
+
+# ==============================================================================
+# COLOR CODING — ACTUAL PRICE MOVEMENT SCORE
+# ==============================================================================
+def color_price_movement(df):
 
     style_df = pd.DataFrame(
         "",
@@ -316,115 +263,51 @@ def color_price_position(df):
         columns=df.columns
     )
 
-    if "Price_Position" not in df.columns:
+    if "Price_Movement_Score" not in df.columns:
         return style_df
 
     for i in range(len(df)):
+        score = df.iloc[i]["Price_Movement_Score"]
 
-        pos = df.iloc[i]["Price_Position"]
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            continue
 
-        if pos == "SAFE":
-
+        if score >= 3:
             style_df.loc[
                 df.index[i],
-                "Price_Position"
+                "Price_Movement_Score"
             ] = (
-                "background-color:#4CAF50;"
+                "background-color:#006400;"
                 "color:white;"
                 "font-weight:bold;"
             )
-
-        elif pos == "CAUTION":
-
+        elif score >= 2:
             style_df.loc[
                 df.index[i],
-                "Price_Position"
+                "Price_Movement_Score"
             ] = (
-                "background-color:#FFC107;"
+                "background-color:#32CD32;"
                 "color:black;"
                 "font-weight:bold;"
             )
-
-        elif pos == "DANGER":
-
+        elif score >= 1:
             style_df.loc[
                 df.index[i],
-                "Price_Position"
+                "Price_Movement_Score"
             ] = (
-                "background-color:#FF5722;"
-                "color:white;"
-                "font-weight:bold;"
-            )
-
-        elif pos == "STOP":
-
-            style_df.loc[
-                df.index[i],
-                "Price_Position"
-            ] = (
-                "background-color:#F44336;"
-                "color:white;"
-                "font-weight:bold;"
-            )
-
-    return style_df
-
-# =========================================================
-# COLOR CODING — EXIT SIGNAL
-# =========================================================
-def color_exit_signal(df):
-
-    style_df = pd.DataFrame(
-        "",
-        index=df.index,
-        columns=df.columns
-    )
-
-    if "Exit_Signal" not in df.columns:
-        return style_df
-
-    for i in range(len(df)):
-
-        sig = df.iloc[i]["Exit_Signal"]
-
-        if sig == "EXIT_PROFIT":
-
-            style_df.loc[
-                df.index[i],
-                "Exit_Signal"
-            ] = (
-                "background-color:#4CAF50;"
-                "color:white;"
-                "font-weight:bold;"
-            )
-
-        elif sig == "EXIT_STOP":
-
-            style_df.loc[
-                df.index[i],
-                "Exit_Signal"
-            ] = (
-                "background-color:#F44336;"
-                "color:white;"
-                "font-weight:bold;"
-            )
-
-        else:
-
-            style_df.loc[
-                df.index[i],
-                "Exit_Signal"
-            ] = (
-                "background-color:#FFC107;"
+                "background-color:#FFD700;"
                 "color:black;"
                 "font-weight:bold;"
             )
 
     return style_df
 
-# =========================================================
+
+# ==============================================================================
 # DATA FETCH
-# =========================================================
+# ==============================================================================
 @st.cache_data(ttl=120, show_spinner=False)
 def fetch_clean_market_batch(tickers_tuple):
 
@@ -434,7 +317,6 @@ def fetch_clean_market_batch(tickers_tuple):
         return pd.DataFrame(), pd.DataFrame()
 
     try:
-
         raw_daily = yf.download(
             ticker_list,
             period="3mo",
@@ -455,24 +337,19 @@ def fetch_clean_market_batch(tickers_tuple):
             auto_adjust=False
         )
 
-        # IMPORTANT:
-        # Diagnostics DO NOT belong here because `ticker` does not exist.
-        # Diagnostics must be placed inside the per‑ticker loop in Page1.
-
         return raw_daily, raw_intra
 
     except Exception:
-
         return pd.DataFrame(), pd.DataFrame()
 
-# =========================================================
+
+# ==============================================================================
 # FETCH FLOAT + MARKET CAP
-# =========================================================
+# ==============================================================================
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_float_marketcap(ticker):
 
     try:
-
         ticker_obj = yf.Ticker(ticker)
 
         float_val = 0.0
@@ -481,7 +358,6 @@ def fetch_float_marketcap(ticker):
         float_source = "Unavailable"
 
         try:
-
             fast = ticker_obj.fast_info
 
             try:
@@ -499,11 +375,9 @@ def fetch_float_marketcap(ticker):
                 shares_outstanding = 0.0
 
         except Exception:
-
             fast = None
 
         try:
-
             info = ticker_obj.info
 
             yahoo_float = info.get(
@@ -512,25 +386,20 @@ def fetch_float_marketcap(ticker):
             )
 
             if yahoo_float:
-
                 try:
                     float_val = float(yahoo_float)
-
                     if float_val > 0:
                         float_source = "floatShares"
-
                 except Exception:
                     float_val = 0.0
 
             if shares_outstanding <= 0:
-
                 yahoo_shares = info.get(
                     "sharesOutstanding",
                     0
                 )
 
                 if yahoo_shares:
-
                     try:
                         shares_outstanding = float(
                             yahoo_shares
@@ -539,14 +408,12 @@ def fetch_float_marketcap(ticker):
                         shares_outstanding = 0.0
 
             if market_cap <= 0:
-
                 yahoo_market_cap = info.get(
                     "marketCap",
                     0
                 )
 
                 if yahoo_market_cap:
-
                     try:
                         market_cap = float(
                             yahoo_market_cap
@@ -555,32 +422,19 @@ def fetch_float_marketcap(ticker):
                         market_cap = 0.0
 
         except Exception:
-
             pass
 
-        if float_val <= 0:
+        if float_val <= 0 and shares_outstanding > 0:
+            float_val = shares_outstanding
+            float_source = "sharesOutstanding_fallback"
 
-            if shares_outstanding > 0:
-
-                float_val = shares_outstanding
-                float_source = "sharesOutstanding_fallback"
-
-        if (
-            not np.isfinite(float_val)
-            or float_val < 0
-        ):
+        if not np.isfinite(float_val) or float_val < 0:
             float_val = 0.0
 
-        if (
-            not np.isfinite(market_cap)
-            or market_cap < 0
-        ):
+        if not np.isfinite(market_cap) or market_cap < 0:
             market_cap = 0.0
 
-        if (
-            not np.isfinite(shares_outstanding)
-            or shares_outstanding < 0
-        ):
+        if not np.isfinite(shares_outstanding) or shares_outstanding < 0:
             shares_outstanding = 0.0
 
         return (
@@ -591,23 +445,23 @@ def fetch_float_marketcap(ticker):
         )
 
     except Exception:
-
         return (
             0.0,
             0.0,
             0.0,
             "Unavailable"
         )
-#PART 2
-# =========================================================
-# MOMENTUM ENGINE (with continuation score)
-# =========================================================
+
+
+# ==============================================================================
+# MOMENTUM ENGINE
+# ==============================================================================
 def momentum_rank_universe_batch(
-        tickers,
-        batch_daily,
-        batch_intra,
-        min_price,
-        max_price
+    tickers,
+    batch_daily,
+    batch_intra,
+    min_price,
+    max_price
 ):
 
     rows = []
@@ -620,19 +474,33 @@ def momentum_rank_universe_batch(
     ):
         return pd.DataFrame()
 
-    eastern = pytz.timezone("US/Eastern")
-    now_est = datetime.now(eastern)
+    now_est = datetime.now(EST)
     current_date_est = now_est.date()
 
-    available_daily = set(
-        batch_daily.columns.get_level_values(0)
-    )
+    # --------------------------------------------------------------------------
+    # Determine available tickers safely for both normal MultiIndex layouts.
+    # --------------------------------------------------------------------------
+    try:
+        if isinstance(batch_daily.columns, pd.MultiIndex):
+            available_daily = set(
+                batch_daily.columns.get_level_values(0)
+            )
+        else:
+            available_daily = set(tickers)
+    except Exception:
+        available_daily = set(tickers)
 
-    available_intra = set(
-        batch_intra.columns.get_level_values(0)
-    )
+    try:
+        if isinstance(batch_intra.columns, pd.MultiIndex):
+            available_intra = set(
+                batch_intra.columns.get_level_values(0)
+            )
+        else:
+            available_intra = set(tickers)
+    except Exception:
+        available_intra = set(tickers)
 
-    active_pool = list(
+    active_pool = sorted(
         set(tickers)
         .intersection(available_daily)
         .intersection(available_intra)
@@ -641,7 +509,9 @@ def momentum_rank_universe_batch(
     for ticker in active_pool:
 
         try:
-
+            # ------------------------------------------------------------------
+            # Extract ticker slices.
+            # ------------------------------------------------------------------
             daily_df = (
                 batch_daily[ticker]
                 .copy()
@@ -661,60 +531,67 @@ def momentum_rank_universe_batch(
             ):
                 continue
 
+            # ------------------------------------------------------------------
+            # Normalize intraday timezone.
+            # ------------------------------------------------------------------
             try:
-
                 intra_index = pd.DatetimeIndex(
                     intraday_df.index
                 )
 
                 if intra_index.tz is not None:
-
                     intra_index = intra_index.tz_convert(
-                        "US/Eastern"
+                        "America/New_York"
                     )
-
                 else:
-
                     intra_index = intra_index.tz_localize(
-                        "US/Eastern"
+                        "America/New_York"
                     )
 
                 intraday_df.index = intra_index
 
             except Exception:
-
                 continue
 
             if len(intraday_df.index) == 0:
                 continue
 
-            latest_intraday_timestamp = (
-                intraday_df.index[-1]
-            )
+            latest_intraday_timestamp = intraday_df.index[-1]
+            latest_intraday_date = latest_intraday_timestamp.date()
 
-            latest_intraday_date = (
-                latest_intraday_timestamp.date()
-            )
-
+            # ------------------------------------------------------------------
+            # CRITICAL CURRENT-DAY PROTECTION
+            # ------------------------------------------------------------------
+            # Never allow yesterday's intraday data to appear as today's signal.
+            # ------------------------------------------------------------------
             if latest_intraday_date != current_date_est:
                 continue
 
-            data_as_of = (
-                latest_intraday_timestamp
-                .strftime("%Y-%m-%d %H:%M:%S")
-                )   
-           
-            vol_d = daily_df["Volume"].values
+            data_as_of = latest_intraday_timestamp.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
 
-            avg_volume_20d = (
-                float(np.mean(vol_d[-20:]))
-                if len(vol_d) >= 20
-                else float(vol_d[-1])
+            # ------------------------------------------------------------------
+            # 20-day average volume
+            # ------------------------------------------------------------------
+            vol_d = pd.to_numeric(
+                daily_df["Volume"],
+                errors="coerce"
+            ).fillna(0).values
+
+            if len(vol_d) < 20:
+                continue
+
+            avg_volume_20d = float(
+                np.mean(vol_d[-20:])
             )
 
             if avg_volume_20d < 250000:
                 continue
 
+            # ------------------------------------------------------------------
+            # Current intraday price is the scanner's current price.
+            # ------------------------------------------------------------------
             current_price = float(
                 intraday_df["Close"].iloc[-1]
             )
@@ -725,27 +602,41 @@ def momentum_rank_universe_batch(
             ):
                 continue
 
-            close_i = intraday_df["Close"].values
-            vol_i = intraday_df["Volume"].values
+            close_i = pd.to_numeric(
+                intraday_df["Close"],
+                errors="coerce"
+            ).dropna().values
+
+            vol_i = pd.to_numeric(
+                intraday_df["Volume"],
+                errors="coerce"
+            ).fillna(0).values
 
             if len(close_i) < 5:
                 continue
 
+            # ------------------------------------------------------------------
+            # EMA9 — standardized to adjust=False.
+            # ------------------------------------------------------------------
             ema9_i_series = (
-                intraday_df["Close"]
-                .ewm(span=9)
+                pd.Series(close_i)
+                .ewm(
+                    span=9,
+                    adjust=False
+                )
                 .mean()
                 .values
             )
 
+            # ------------------------------------------------------------------
+            # EMA9 velocity: 5-bar relative change.
+            # ------------------------------------------------------------------
             if len(ema9_i_series) >= 5:
-
-                previous_ema9 = (
+                previous_ema9 = float(
                     ema9_i_series[-5]
                 )
 
                 if previous_ema9 != 0:
-
                     ema9_slope_10 = (
                         (
                             ema9_i_series[-1]
@@ -753,152 +644,148 @@ def momentum_rank_universe_batch(
                         )
                         / previous_ema9
                     ) * 100
-
                 else:
-
                     ema9_slope_10 = 0.0
-
             else:
-
                 ema9_slope_10 = 0.0
 
-            intraday_total_volume = float(
-                vol_i.sum()
+            # ------------------------------------------------------------------
+            # Actual short-term price movement.
+            #
+            # This is deliberately separate from Momentum Score so Monday's
+            # test can show whether it adds useful information without changing
+            # the existing 0-8 momentum calculation.
+            # ------------------------------------------------------------------
+            last5 = close_i[-5:]
+
+            if last5[0] > 0:
+                price_change_5bar_pct = (
+                    (last5[-1] - last5[0])
+                    / last5[0]
+                ) * 100
+            else:
+                price_change_5bar_pct = 0.0
+
+            movement_score = price_movement_score(
+                price_change_5bar_pct
             )
 
-            #NEW RVOL CALCULATION
-            # =================================================
+            # ------------------------------------------------------------------
             # TIME-OF-DAY ADJUSTED RVOL
-            #
-            # We compare today's accumulated volume against
-            # the amount of volume normally expected to have
-            # traded by this time of day.
-            #
-            # Regular US session:
-            # 09:30 - 16:00 = 390 minutes
-            # =================================================
-
+            # Regular session = 390 minutes.
+            # ------------------------------------------------------------------
             intraday_total_volume = float(
-                vol_i.sum()
+                np.sum(vol_i)
             )
 
             latest_bar_time = intraday_df.index[-1]
 
-            # Convert to Eastern if necessary
             if latest_bar_time.tzinfo is None:
-                latest_bar_time = eastern.localize(
-                    latest_bar_time
+                latest_bar_time = latest_bar_time.replace(
+                    tzinfo=EST
                 )
             else:
                 latest_bar_time = latest_bar_time.astimezone(
-                    eastern
+                    EST
                 )
 
             market_open = latest_bar_time.replace(
-                        hour=9,
-                        minute=30,
-                        second=0,
-                        microsecond=0
-            )
-
-            market_close = latest_bar_time.replace(
-                hour=16,
-                minute=0,
+                hour=9,
+                minute=30,
                 second=0,
                 microsecond=0
             )
 
             elapsed_minutes = (
-                        latest_bar_time - market_open
+                latest_bar_time - market_open
             ).total_seconds() / 60.0
 
-            #Keep elapsed time inside the regular session
             elapsed_minutes = max(
-                        1.0,
-                        min(
-                            elapsed_minutes,
-                            390.0
-                        )
+                1.0,
+                min(
+                    elapsed_minutes,
+                    390.0
+                )
             )
 
             session_fraction = (
-                        elapsed_minutes / 390.0
+                elapsed_minutes / 390.0
             )
 
-            # Expected volume assuming the average daily volume
-            # is distributed across the regular session.
             expected_volume_by_now = (
-                        avg_volume_20d
-                        * session_fraction
+                avg_volume_20d
+                * session_fraction
             )
 
             if expected_volume_by_now > 0:
-
                 rvol = (
                     intraday_total_volume
                     / expected_volume_by_now
                 )
             else:
-
                 rvol = 1.0
 
+            # ------------------------------------------------------------------
+            # VWAP proxy from accumulated intraday close * volume.
+            # ------------------------------------------------------------------
             cv_slice = vol_i * close_i
 
             vwap_spot = (
-                        cv_slice.sum() / vol_i.sum()
-                        if vol_i.sum() > 0
-                        else current_price
+                cv_slice.sum() / vol_i.sum()
+                if vol_i.sum() > 0
+                else current_price
             )
 
-            high_i = intraday_df["High"].iloc[-1]
-            low_i = intraday_df["Low"].iloc[-1]
+            # ------------------------------------------------------------------
+            # Current intraday bar range.
+            # ------------------------------------------------------------------
+            high_i = float(
+                intraday_df["High"].iloc[-1]
+            )
+            low_i = float(
+                intraday_df["Low"].iloc[-1]
+            )
 
             range_pct = (
-            ((high_i - low_i) / low_i) * 100
-            if low_i > 0
-            else 0
+                ((high_i - low_i) / low_i) * 100
+                if low_i > 0
+                else 0.0
             )
 
-            float_val, market_cap, shares_outstanding, float_source = fetch_float_marketcap(ticker)
+            # ------------------------------------------------------------------
+            # Float / market cap.
+            # ------------------------------------------------------------------
+            (
+                float_val,
+                market_cap,
+                shares_outstanding,
+                float_source
+            ) = fetch_float_marketcap(ticker)
 
+            # ------------------------------------------------------------------
+            # Existing Momentum Score — intentionally unchanged.
+            # Maximum = 8.
+            # ------------------------------------------------------------------
             if ema9_slope_10 > 0.60:
-
                 velocity_score = 4.0
-
             elif ema9_slope_10 > 0.30:
-
                 velocity_score = 3.0
-
             elif ema9_slope_10 > 0.15:
-
                 velocity_score = 2.0
-
             elif ema9_slope_10 > 0.00:
-
                 velocity_score = 1.0
-
             else:
-
                 velocity_score = 0.0
 
             if rvol > 5.0:
-
                 rvol_score = 4.0
-
             elif rvol > 3.0:
-
                 rvol_score = 3.0
-
             elif rvol > 2.0:
-
                 rvol_score = 2.0
-
             elif rvol > 1.2:
-
                 rvol_score = 1.0
-
             else:
-
                 rvol_score = 0.0
 
             momentum_score = (
@@ -906,6 +793,9 @@ def momentum_rank_universe_batch(
                 + rvol_score
             )
 
+            # ------------------------------------------------------------------
+            # Continuation Score — unchanged.
+            # ------------------------------------------------------------------
             cont_score = continuation_score(
                 float_val,
                 market_cap,
@@ -914,55 +804,35 @@ def momentum_rank_universe_batch(
             )
 
             rows.append({
-
                 "Ticker": ticker,
-
-                "Close": round(
-                    current_price,
-                    2
-                ),
-
+                "Close": round(current_price, 2),
                 "Momentum_Score": round(
                     momentum_score,
                     2
                 ),
-
                 "Continuation_Score": cont_score,
-
-                "RVOL": round(
-                    rvol,
+                "Price_Change_5B_Pct": round(
+                    price_change_5bar_pct,
                     2
                 ),
-
-                "Range_Pct": round(
-                    range_pct,
-                    2
-                ),
-
+                "Price_Movement_Score": movement_score,
+                "RVOL": round(rvol, 2),
+                "Range_Pct": round(range_pct, 2),
                 "Float": float_val,
-
                 "Market_Cap": market_cap,
-
-                "VWAP": round(
-                    vwap_spot,
-                    2
-                ),
-
+                "VWAP": round(vwap_spot, 2),
                 "EMA9_Slope_10": round(
                     ema9_slope_10,
                     3
                 ),
-
                 "Data_As_Of": data_as_of
             })
-      
-        #NEW EXCEPT BLOCK
+
         except Exception as e:
             print(
                 f"ERROR processing {ticker}: "
                 f"{type(e).__name__}: {e}"
             )
-
             continue
 
     if not rows:
@@ -970,21 +840,23 @@ def momentum_rank_universe_batch(
 
     df = pd.DataFrame(rows)
 
-    df["Momentum_Score"] = pd.to_numeric(
-        df["Momentum_Score"],
-        errors="coerce"
-    ).fillna(0.0)
-
-    df["Continuation_Score"] = pd.to_numeric(
-        df["Continuation_Score"],
-        errors="coerce"
-    ).fillna(0.0)
+    for col in [
+        "Momentum_Score",
+        "Continuation_Score",
+        "Price_Change_5B_Pct",
+        "Price_Movement_Score"
+    ]:
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce"
+        ).fillna(0.0)
 
     return df
 
-# =========================================================
+
+# ==============================================================================
 # SIDEBAR FILTERS
-# =========================================================
+# ==============================================================================
 st.markdown("### 🔍 Price Boundaries Filter")
 
 min_price = st.number_input(
@@ -1009,14 +881,19 @@ min_momentum_score = st.number_input(
     "Minimum Momentum Score",
     value=4.0,
     min_value=0.0,
-    max_value=30.0,
+    max_value=8.0,
     step=0.5,
     key="momentum_min_score"
 )
-#PART 3
-# =========================================================
+
+st.caption(
+    "Momentum Score remains 0–8. "
+    "5-bar actual price movement is displayed separately and does not change it."
+)
+
+# ==============================================================================
 # RUN MOMENTUM ENGINE
-# =========================================================
+# ==============================================================================
 run_momentum = st.button(
     "Run Momentum Model Scan",
     key="run_momentum_model"
@@ -1024,37 +901,33 @@ run_momentum = st.button(
 
 if run_momentum:
 
-    try:
+    progress_bar = None
 
+    try:
+        # Clear cached market data so a manual Run requests a fresh snapshot.
         st.cache_data.clear()
 
         start_time = time.time()
+        now_est = datetime.now(EST)
 
-        eastern = pytz.timezone(
-            "US/Eastern"
-        )
-
-        now_est = datetime.now(
-            eastern
-        )
-
+        # ----------------------------------------------------------------------
+        # WEEKEND CHECK
+        # ----------------------------------------------------------------------
         if now_est.weekday() >= 5:
-
             st.warning(
                 "⚠️ U.S. stock market is closed today."
             )
 
             st.info(
-                "The Momentum Model requires "
-                "current-day 1-minute intraday data. "
-                "No scan was performed, so Friday's "
-                "data cannot appear as Sunday's momentum."
+                "The Momentum Model requires current-day 1-minute intraday data. "
+                "No scan was performed, so Friday's data cannot appear as "
+                "weekend momentum."
             )
 
             st.stop()
 
         st.markdown(
-            f"⏱️ Scan Time: "
+            "⏱️ Scan Time: "
             f"**{now_est.strftime('%Y-%m-%d %H:%M:%S')} EST**"
         )
 
@@ -1072,18 +945,13 @@ if run_momentum:
             text="Loading market data..."
         )
 
-        raw_daily, raw_intra = (
-            fetch_clean_market_batch(
-                tuple(universe_list)
-            )
+        raw_daily, raw_intra = fetch_clean_market_batch(
+            tuple(universe_list)
         )
 
         progress_bar.progress(
             70,
-            text=(
-                "Running momentum + "
-                "continuation engine..."
-            )
+            text="Running momentum + continuation engine..."
         )
 
         ranking = momentum_rank_universe_batch(
@@ -1094,17 +962,11 @@ if run_momentum:
             max_price
         )
 
-        if (
-            ranking is not None
-            and not ranking.empty
-        ):
-
+        if ranking is not None and not ranking.empty:
             st.session_state[
                 "momentum_raw_ranking"
             ] = ranking
-
         else:
-
             st.session_state[
                 "momentum_raw_ranking"
             ] = pd.DataFrame()
@@ -1117,40 +979,36 @@ if run_momentum:
         progress_bar.empty()
 
         st.write(
-            f"⚡ Total Runtime: "
+            "⚡ Total Runtime: "
             f"{time.time() - start_time:.2f} seconds"
         )
 
     except Exception as e:
 
-        try:
-            progress_bar.empty()
-        except NameError:
-            pass
+        if progress_bar is not None:
+            try:
+                progress_bar.empty()
+            except Exception:
+                pass
 
         st.error(
-            f"Momentum model execution failed: "
+            "Momentum model execution failed: "
             f"{str(e)}"
         )
 
         st.exception(e)
 
-# =========================================================
+
+# ==============================================================================
 # RENDER RESULTS PANEL
-# =========================================================
-if (
-    "momentum_raw_ranking"
-    in st.session_state
-):
+# ==============================================================================
+if "momentum_raw_ranking" in st.session_state:
 
     ranking = st.session_state[
         "momentum_raw_ranking"
     ]
 
-    if (
-        ranking is not None
-        and not ranking.empty
-    ):
+    if ranking is not None and not ranking.empty:
 
         filtered = ranking.copy()
 
@@ -1161,30 +1019,32 @@ if (
         ]
 
         filtered = filtered[
-            filtered["Momentum_Score"]
-            >= min_momentum_score
+            filtered["Momentum_Score"] >= min_momentum_score
         ]
 
         if filtered.empty:
-
             st.info(
                 "No tickers matched your filters."
             )
 
         else:
-
+            # ------------------------------------------------------------------
+            # Primary ranking remains Momentum Score, then Continuation Score.
+            # Actual price movement is a secondary ranking observation.
+            # ------------------------------------------------------------------
             display_df = filtered.copy()
 
             display_df = display_df.sort_values(
                 by=[
                     "Momentum_Score",
-                    "Continuation_Score"
+                    "Continuation_Score",
+                    "Price_Movement_Score",
+                    "Price_Change_5B_Pct"
                 ],
                 ascending=False
             )
 
             if "Data_As_Of" in display_df.columns:
-
                 data_as_of_values = (
                     display_df["Data_As_Of"]
                     .dropna()
@@ -1192,31 +1052,42 @@ if (
                 )
 
                 if len(data_as_of_values) > 0:
-
                     st.caption(
                         "📡 Intraday Data As Of: "
                         f"**{data_as_of_values[0]} EST**"
                     )
 
             st.subheader(
-                f"🔥 Momentum Matrix — "
-                f"{len(display_df)} Tickers"
+                f"🔥 Momentum Matrix — {len(display_df)} Tickers"
+            )
+
+            st.caption(
+                "Momentum Score = core momentum signal. "
+                "Continuation Score = structural continuation context. "
+                "Price Change 5B = actual recent price movement for validation/ranking."
             )
 
             st.dataframe(
-                display_df.style.apply(
+                display_df.style
+                .apply(
                     color_continuation,
+                    axis=None
+                )
+                .apply(
+                    color_price_movement,
                     axis=None
                 ),
                 hide_index=True,
                 use_container_width=True
             )
 
+            # ==================================================================
+            # RESET OBSERVATION TIMELINE
+            # ==================================================================
             if st.button(
-                "Reset Momentum Tracker",
+                "Reset Momentum Timeline",
                 key="reset_momentum_tracker"
             ):
-
                 st.session_state[
                     "momentum_history"
                 ] = []
@@ -1224,34 +1095,18 @@ if (
                 st.session_state[
                     "momentum_history_date"
                 ] = date.today()
-
-                st.session_state[
-                    "entry_prices"
-                ] = {}
-
-                st.session_state[
-                    "stop_limits"
-                ] = {}
-
-                st.session_state[
-                    "safe_thresholds"
-                ] = {}
-
-                st.session_state[
-                    "profit_targets"
-                ] = {}
 
                 st.success(
-                    "Momentum tracker reset."
+                    "Momentum observation timeline reset."
                 )
 
+            # ------------------------------------------------------------------
+            # New day = new observation timeline.
+            # ------------------------------------------------------------------
             if (
-                st.session_state[
-                    "momentum_history_date"
-                ]
+                st.session_state["momentum_history_date"]
                 != date.today()
             ):
-
                 st.session_state[
                     "momentum_history"
                 ] = []
@@ -1260,125 +1115,30 @@ if (
                     "momentum_history_date"
                 ] = date.today()
 
-                st.session_state[
-                    "entry_prices"
-                ] = {}
-
-                st.session_state[
-                    "stop_limits"
-                ] = {}
-
-                st.session_state[
-                    "safe_thresholds"
-                ] = {}
-
-                st.session_state[
-                    "profit_targets"
-                ] = {}
-
+            # ==================================================================
+            # MOMENTUM TIMELINE — TOP 5 OBSERVATIONS
+            #
+            # This is deliberately NOT an entry/exit tracker.
+            # Each row is simply what the scanner observed at that run.
+            # ==================================================================
             top5 = display_df.head(5).copy()
 
-            top5["Timestamp"] = (
-                datetime.now(
-                    pytz.timezone("US/Eastern")
-                ).strftime(
-                    "%Y-%m-%d %Y-%m-%d %H:%M:%S"
-                )
+            top5["Scan_Timestamp"] = datetime.now(EST).strftime(
+                "%Y-%m-%d %H:%M:%S"
             )
-
-            for idx, row in top5.iterrows():
-
-                ticker = row["Ticker"]
-
-                current_price = row["Close"]
-
-                if (
-                    ticker
-                    not in st.session_state[
-                        "entry_prices"
-                    ]
-                ):
-
-                    st.session_state[
-                        "entry_prices"
-                    ][ticker] = current_price
-
-                    st.session_state[
-                        "stop_limits"
-                    ][ticker] = (
-                        current_price
-                        * 0.9995
-                    )
-
-                    st.session_state[
-                        "safe_thresholds"
-                    ][ticker] = (
-                        current_price
-                        * 1.0005
-                    )
-
-                    st.session_state[
-                        "profit_targets"
-                    ][ticker] = (
-                        compute_profit_target(
-                            current_price,
-                            pct=0.015
-                        )
-                    )
-
-                entry_price = (
-                    st.session_state[
-                        "entry_prices"
-                    ][ticker]
-                )
-
-                profit_target_price = (
-                    st.session_state[
-                        "profit_targets"
-                    ][ticker]
-                )
-
-                price_position = (
-                    compute_price_position(
-                        entry_price,
-                        current_price
-                    )
-                )
-
-                exit_signal = (
-                    compute_exit_signal(
-                        entry_price,
-                        current_price
-                    )
-                )
-
-                profit_target_hit = (
-                    current_price
-                    >= profit_target_price
-                )
-
-                top5.loc[
-                    idx,
-                    "Price_Position"
-                ] = price_position
-
-                top5.loc[
-                    idx,
-                    "Exit_Signal"
-                ] = exit_signal
-
-                top5.loc[
-                    idx,
-                    "Profit_Target_Hit"
-                ] = (
-                    "YES"
-                    if profit_target_hit
-                    else "NO"
-                )
 
             st.session_state[
                 "momentum_history"
             ].append(top5)
+
+            # Keep a practical in-session history rather than allowing an
+            # unlimited dataframe to grow during repeated two-minute scans.
+            if len(st.session_state["momentum_history"]) > 60:
+                st.session_state[
+                    "momentum_history"
+                ] = st.session_state[
+                    "momentum_history"
+                ][-60:]
 
             history_df = pd.concat(
                 st.session_state[
@@ -1388,7 +1148,12 @@ if (
             )
 
             st.subheader(
-                "📊 Momentum Timeline — Top 5"
+                "📊 Momentum Observation Timeline — Top 5"
+            )
+
+            st.caption(
+                "Observation history only. No assumed entry price, profit target, "
+                "stop calculation, or automatic exit signal is generated."
             )
 
             st.dataframe(
@@ -1398,11 +1163,7 @@ if (
                     axis=None
                 )
                 .apply(
-                    color_price_position,
-                    axis=None
-                )
-                .apply(
-                    color_exit_signal,
+                    color_price_movement,
                     axis=None
                 ),
                 hide_index=True,

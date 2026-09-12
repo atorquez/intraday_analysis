@@ -1087,13 +1087,13 @@ def ema_alignment_engine(
             )
         )
 
-        cond_lastbar_higher_3 = bool(
-            last5[-1] > last5[-3]
-        )
+        #cond_lastbar_higher_3 = bool(
+        #    last5[-1] > last5[-3]
+        #)
 
-        cond_lastbar_higher_4 = bool(
-            last5[-1] > last5[-4]
-        )
+        #cond_lastbar_higher_4 = bool(
+        #    last5[-1] > last5[-4]
+        #)
 
         # ====================================================
         # DEVELOPMENT SIGNAL — DIAGNOSTIC ONLY

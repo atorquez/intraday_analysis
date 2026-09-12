@@ -7,8 +7,9 @@
 import streamlit as st
 
 st.set_page_config(layout="wide", page_title="Institutional Model")
-st.caption("Version: 2026-09-03 — Price-vs-Close Softened")
-st.title("📈 Institutional Model")
+st.caption("Version: V2 2026-09-12 — Institutional Opportunity Scanner")
+st.title("📈 Institutional Opportunity Scanner")
+st.caption("V2: one Watch List output; price-vs-previous-close, resistance, and morning-high relationships are informational rather than hard rejection gates.")
 
 import importlib
 import time
@@ -149,25 +150,24 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             if avg_volume_20d < 250000:
                 continue
 
-            current_price = float(
-                daily_df["Close"].iloc[-1].squeeze()
-                if hasattr(daily_df["Close"].iloc[-1], "squeeze")
-                else daily_df["Close"].iloc[-1]
-            )
-            if current_price < min_price or current_price > max_price:
-                continue
-
             # Isolate Intraday Arrays early for Institutional Safety Protection Gates
             open_intra = intraday_df["Open"].values
             close_intra = intraday_df["Close"].values
             high_intra = intraday_df["High"].values
             low_intra = intraday_df["Low"].values
             vol_intra = intraday_df["Volume"].values
+
+            # Use the latest intraday close as the live/current price.
+            # The previous daily close remains a reference value only.
+            current_intraday_price = float(close_intra[-1])
+            current_price = current_intraday_price
+
+            if current_price < min_price or current_price > max_price:
+                continue
             
             if len(close_intra) < 5:
                 continue
                 
-            current_intraday_price = float(close_intra[-1])
             session_open_price = float(open_intra.ravel()[0]) if hasattr(open_intra, "ravel") else float(open_intra)
 
             # ----------------------------------------------------------------------
@@ -213,17 +213,34 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             # ----------------------------------------------------------------------
             # 🚨 MULTI-DAY RESISTANCE SHIELD (soft band)
             # ----------------------------------------------------------------------
-            max_5day_overhead_resistance = float(high_d[-6:-1].max()) if len(high_d) >= 6 else float(high_d[0])
-            buffer = 0.01 * max_5day_overhead_resistance  # ~1% band
-            if current_intraday_price < (max_5day_overhead_resistance - buffer):
-                continue
+            max_5day_overhead_resistance = float(
+                high_d[-6:-1].max()
+            ) if len(high_d) >= 6 else float(high_d[0])
+
+            # Distance to recent resistance is informational/ranking data.
+            # Do not reject a developing opportunity simply because price
+            # has not reached resistance yet.
+            resistance_distance_pct = (
+                (max_5day_overhead_resistance - current_intraday_price)
+                / current_intraday_price
+                if current_intraday_price > 0 else 0.0
+            )
 
             # ----------------------------------------------------------------------
             # 🚨 10:30 AM INTRADAY RETEST GATE
             # ----------------------------------------------------------------------
-            morning_high_marker = float(high_intra[:30].max()) if len(high_intra) >= 30 else session_open_price
-            if len(high_intra) > 45 and current_intraday_price < morning_high_marker:
-                continue
+            morning_high_marker = (
+                float(high_intra[:30].max())
+                if len(high_intra) >= 30 else session_open_price
+            )
+
+            # Morning-high relationship is informational for an
+            # investment-oriented scanner; it is not a hard rejection.
+            morning_high_distance_pct = (
+                (morning_high_marker - current_intraday_price)
+                / current_intraday_price
+                if current_intraday_price > 0 else 0.0
+            )
 
             # ----------------------------------------------------------------------
             # 🚨 EXHAUSTION CAP GATE (still caps blowouts)
@@ -236,7 +253,7 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             # ----------------------------------------------------------------------
             # 📈 HARDENED 20-BAR INTRADAY EMA9 VELOCITY FILTER
             # ----------------------------------------------------------------------
-            ema9_i_series = intraday_df["Close"].ewm(span=9).mean().values
+            ema9_i_series = intraday_df["Close"].ewm(span=9, adjust=False).mean().values
             if len(ema9_i_series) >= 20:
                 intraday_velocity_slope = float(
                     (ema9_i_series[-1] - ema9_i_series[-20]) / ema9_i_series[-20]
@@ -257,9 +274,9 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             else:
                 intraday_velocity_penalty = 0.0       # neutral midday behavior
 
-            ema9_d = daily_df["Close"].ewm(span=9).mean().values
-            ema20_d = daily_df["Close"].ewm(span=20).mean().values
-            ema50_d = daily_df["Close"].ewm(span=50).mean().values
+            ema9_d = daily_df["Close"].ewm(span=9, adjust=False).mean().values
+            ema20_d = daily_df["Close"].ewm(span=20, adjust=False).mean().values
+            ema50_d = daily_df["Close"].ewm(span=50, adjust=False).mean().values
 
             if ema20_d[-1] > ema50_d[-1]:
                 trend = "UP"
@@ -275,30 +292,88 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             )
 
             # ------------------------------------------------------------------
-            # ⭐ NEW: SOFTENED PRICE VS CLOSE CLASSIFICATION
-            # Allow up to ~2% dip vs prior close as "Near Close"
+            # PRICE VS PREVIOUS CLOSE
+            # Previous daily close is a reference, not a rejection gate.
             # ------------------------------------------------------------------
             prev_close = float(close_d[-2] if len(close_d) >= 2 else current_price)
-            drop_pct = (prev_close - current_intraday_price) / prev_close if prev_close > 0 else 0.0
+            drop_pct = (
+                (prev_close - current_intraday_price) / prev_close
+                if prev_close > 0 else 0.0
+            )
+
+            price_change_vs_close_pct = (
+                ((current_intraday_price - prev_close) / prev_close) * 100
+                if prev_close > 0 else 0.0
+            )
 
             if current_intraday_price > prev_close:
                 price_vs_close = "Above Close"
             elif drop_pct <= 0.02:
-                price_vs_close = "Near Close"   # up to -2% dip allowed
+                price_vs_close = "Near Close"
+            elif drop_pct <= 0.05:
+                price_vs_close = "Recovery Candidate"
             else:
                 price_vs_close = "Below Close"
 
             # ------------------------------------------------------------------
-            # EXECUTION LOGIC — now aware of "Near Close"
+            # INSTITUTIONAL OPPORTUNITY CLASSIFICATION
+            # One actionable output: WATCH LIST.
+            # The type describes the structure; it is not a trade command.
             # ------------------------------------------------------------------
-            if ema9_d[-1] > ema20_d[-1] and ema9_slope > 0 and ema20_slope > 0:
-                execution = "Watch List"
-            elif proximity_metric < 0.003:
-                execution = "Crossing Soon"
-            elif price_vs_close == "Near Close" and ema9_d[-1] > ema20_d[-1]:
-                execution = "Setup Only"
+            intraday_ema9 = float(ema9_i_series[-1])
+            intraday_ema20 = (
+                float(intraday_df["Close"].ewm(span=20, adjust=False).mean().values[-1])
+                if len(intraday_df) >= 2 else intraday_ema9
+            )
+
+            daily_bullish_structure = (
+                ema9_d[-1] > ema20_d[-1]
+                and ema9_slope > 0
+                and ema20_slope > 0
+            )
+
+            intraday_bullish_structure = (
+                current_intraday_price > intraday_ema9
+                and intraday_ema9 > intraday_ema20
+            )
+
+            if daily_bullish_structure and intraday_bullish_structure:
+                opportunity_type = (
+                    "Recovery"
+                    if current_intraday_price < prev_close
+                    else "Continuation"
+                )
+            elif (
+                (ema9_d[-1] > ema20_d[-1] and ema20_slope > 0)
+                or (intraday_ema9 > intraday_ema20)
+            ):
+                opportunity_type = "Developing"
             else:
-                execution = "Not Watch List"
+                opportunity_type = "Structural"
+
+            # Simple institutional watch-list rule.
+            # Avoid creating multiple competing execution states.
+            watch_conditions = (
+                len(daily_df) >= 40
+                and len(intraday_df) >= 5
+                and avg_volume_20d >= 250000
+                and current_intraday_price >= min_price
+                and current_intraday_price <= max_price
+                and intraday_velocity_slope > -0.20
+                and vwap_dist_pct <= 0.03
+                and today_total_gain_pct <= 5.0
+                and (
+                    daily_bullish_structure
+                    or intraday_bullish_structure
+                    or (
+                        current_intraday_price < prev_close
+                        and ema9_d[-1] > ema20_d[-1]
+                        and ema20_slope > 0
+                    )
+                )
+            )
+
+            execution = "Watch List" if watch_conditions else "Not Watch List"
 
             rvol = float(daily_df["Volume"].iloc[-1] / avg_volume_20d) if avg_volume_20d > 0 else 1.0
             gap_pct = float(
@@ -315,8 +390,8 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
             stoch_k = 0.5
 
             if len(intraday_df) > 5:
-                ema9_i = intraday_df["Close"].ewm(span=9).mean().values
-                ema20_i = intraday_df["Close"].ewm(span=20).mean().values
+                ema9_i = intraday_df["Close"].ewm(span=9, adjust=False).mean().values
+                ema20_i = intraday_df["Close"].ewm(span=20, adjust=False).mean().values
                 ema_curve = float(ema9_i[-1] - ema20_i[-1])
                 pca1_slope = float(ema9_i[-1] - ema9_i[-5])
 
@@ -327,7 +402,10 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 "Trend": trend,
                 "Universe": get_universe_source(ticker),
                 "Execution": execution,
+                "Opportunity_Type": opportunity_type,
                 "Close": round(current_price, 2),
+                "Prev_Close": round(prev_close, 2),
+                "Price_Change_vs_Close%": round(price_change_vs_close_pct, 2),
                 "ATR%": round(atr_pct, 2),
                 "RVOL": round(rvol, 2),
                 "Gap%": round(gap_pct, 2),
@@ -338,6 +416,8 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
                 "PCA1_slope": pca1_slope,
                 "EMA_Curve": ema_curve,
                 "VWAP_Dist": vwap_dist,
+                "Resistance_Distance%": round(resistance_distance_pct * 100, 2),
+                "Morning_High_Distance%": round(morning_high_distance_pct * 100, 2),
                 "ROC_10": roc_10,
                 "StochK": stoch_k,
                 "Zero_Line_Boost": ticker_zero_line_boost,
@@ -355,10 +435,12 @@ def local_rank_universe_batch(tickers, batch_daily, batch_intra, min_price, max_
     df["Zero_Line_Boost"] = pd.to_numeric(df["Zero_Line_Boost"], errors="coerce").fillna(0.0)
     df["Velocity_Penalty"] = pd.to_numeric(df["Velocity_Penalty"], errors="coerce").fillna(0.0)
 
+    # Institutional ranking score.
+    # No special "Crossing Soon" boost: the model now has one
+    # Watch List concept and ranks by structural quality.
     df["Score"] = (
         (df["Trend"] == "UP").astype(int) * 2.0 +
         (df["Execution"] == "Watch List").astype(int) * 1.0 +
-        (df["Execution"] == "Crossing Soon").astype(int) * 4.0 +
         df["RVOL"].clip(lower=0) +
         df["Zero_Line_Boost"] +
         df["Velocity_Penalty"] +
@@ -377,9 +459,9 @@ def get_index_trend(ticker):
         if df is None or df.empty:
             return "Unknown"
         df = _flatten_columns(df)
-        df["EMA9"] = df["Close"].ewm(span=9).mean()
-        df["EMA20"] = df["Close"].ewm(span=20).mean()
-        df["EMA50"] = df["Close"].ewm(span=50).mean()
+        df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean()
+        df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+        df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
         
         ema9 = to_scalar(df["EMA9"].iloc[-1])
         ema20 = to_scalar(df["EMA20"].iloc[-1])
@@ -433,12 +515,11 @@ max_price = st.number_input(
     key="intraday_max_price"
 )
 
-st.markdown("### 🎛️ Structural Execution Filters")
-execution_filter = st.multiselect(
-    "Filter by Real-Time Structural Execution Status", 
-    ["Watch List", "Not Watch List", "Crossing Soon", "Setup Only"], 
-    default=["Watch List", "Crossing Soon"], 
-    key="intraday_execution_filter"
+st.markdown("### 🎛️ Institutional Watch List")
+show_watch_only = st.checkbox(
+    "Show Watch List only",
+    value=True,
+    key="institutional_show_watch_only"
 )
 
 def render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend):
@@ -448,7 +529,7 @@ def render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend):
         delta=f"S&P500: {sp500_trend} | NASDAQ: {nasdaq_trend}",
         delta_color="off"
     )
-    st.markdown(f"**Structural Tier-1 Premium Universe:** {len(ranking)} premium tokens verified.")
+    st.markdown(f"**Institutional Universe:** {len(ranking)} premium tokens verified.")
     if filtered is None or filtered.empty:
         st.info("No tickers matched your interactive filter constraints.")
     else:
@@ -459,7 +540,7 @@ def render_results(filtered, ranking, regime, sp500_trend, nasdaq_trend):
                 axis=1
             )
             display_df = display_df.drop(columns=["Universe"], errors="ignore")
-        st.subheader(f"🚀 Actionable Structural Matrix Results — {len(display_df)} Tickers")
+        st.subheader(f"🔎 Institutional Opportunity Watch List — {len(display_df)} Tickers")
         st.dataframe(
             display_df.style.apply(color_execution_column, axis=None),
             hide_index=True,
@@ -543,9 +624,9 @@ if "intraday_raw_ranking" in st.session_state:
         # Price filter
         filtered = filtered[(filtered["Close"] >= min_price) & (filtered["Close"] <= max_price)]
 
-        # Execution filter
-        if execution_filter and "Execution" in filtered.columns:
-            filtered = filtered[filtered["Execution"].isin(execution_filter)]
+        # Simple execution filter: normally show only the Institutional Watch List.
+        if show_watch_only and "Execution" in filtered.columns:
+            filtered = filtered[filtered["Execution"] == "Watch List"]
 
         # ⭐ NEW: Sort by Score descending
         if "Score" in filtered.columns:
