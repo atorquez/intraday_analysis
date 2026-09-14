@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 st.set_page_config(layout="wide", page_title="Institutional EMA Alignment")
 
 st.caption(
-    "Version: V6 2026-09-11 — Institutional EMA Alignment + "
+    "Version: V6 2026-09-12 — Institutional EMA Alignment + "
     "Price Increase Score + Development v3 + Rejection Diagnostics"
 )
 
@@ -1269,19 +1269,19 @@ def ema_alignment_engine(
                     else "FAIL"
                 ),
 
-            "LastBar_Higher_3":
-                (
-                    "PASS"
-                    if cond_lastbar_higher_3
-                    else "FAIL"
-                ),
+            #"LastBar_Higher_3":
+            #    (
+            #        "PASS"
+            #        if cond_lastbar_higher_3
+            #        else "FAIL"
+            #    ),
 
-            "LastBar_Higher_4":
-                (
-                    "PASS"
-                    if cond_lastbar_higher_4
-                    else "FAIL"
-                ),
+            #"LastBar_Higher_4":
+            #    (
+            #        "PASS"
+            #        if cond_lastbar_higher_4
+            #        else "FAIL"
+            #    ),
 
             "Development_Signal":
                 (

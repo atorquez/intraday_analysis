@@ -1,4 +1,3 @@
-#PART 1
 # ==============================================================================
 # 📈 INSTITUTIONAL MODEL
 # SPECIFICATION: PREMIUM UNIVERSE STRUCTURAL TRACKING SYSTEM 
@@ -502,15 +501,15 @@ def color_execution_column(df):
 st.markdown("### 🔍 Price Boundaries Filter")
 min_price = st.number_input(
     "Minimum Asset Close Gate Price ($)",
-    value=40.0,
-    min_value=40.0,
+    value=20.0,
+    min_value=20.0,
     max_value=120.0,
     key="intraday_min_price"
 )
 max_price = st.number_input(
     "Maximum Asset Close Gate Price ($)",
     value=120.0,
-    min_value=40.0,
+    min_value=20.0,
     max_value=120.0,
     key="intraday_max_price"
 )

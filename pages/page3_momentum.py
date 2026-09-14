@@ -1,6 +1,5 @@
 # ==============================================================================
 # 🚀 UNIVERSAL MOMENTUM SCANNER — IMPROVED
-# Version: 2026-09-12
 #
 # DESIGN PRINCIPLE:
 #   The model identifies and ranks opportunities.
@@ -51,7 +50,7 @@ st.set_page_config(
 EST = ZoneInfo("America/New_York")
 
 st.caption(
-    "Version: 2026-09-12 — Momentum + Continuation + Actual Price Movement"
+    "Version: V2 2026-09-12 — Momentum + Continuation + Actual Price Movement"
 )
 
 st.title("🚀 Universal Momentum Scanner — With Continuation Probability")
@@ -861,8 +860,8 @@ st.markdown("### 🔍 Price Boundaries Filter")
 
 min_price = st.number_input(
     "Minimum Price ($)",
-    value=40.0,
-    min_value=40.0,
+    value=20.0,
+    min_value=20.0,
     max_value=120.0,
     key="momentum_min_price"
 )
@@ -870,7 +869,7 @@ min_price = st.number_input(
 max_price = st.number_input(
     "Maximum Price ($)",
     value=120.0,
-    min_value=40.0,
+    min_value=20.0,
     max_value=120.0,
     key="momentum_max_price"
 )
