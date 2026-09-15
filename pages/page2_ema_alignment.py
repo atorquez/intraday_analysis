@@ -1,8 +1,9 @@
 # ==============================================================================
 # 📈 INSTITUTIONAL EMA ALIGNMENT MODEL
 # PURPOSE:
-# Identify institutional-quality tickers showing early EMA alignment
-# WITHOUT requiring momentum, continuation, VWAP, proximity, or price > previous-day close.
+# Identify institutional-quality tickers showing early EMA alignment.
+# Opportunity categorization describes the price relationship to the
+# previous-day close without changing the EMA qualification logic.
 
 # ==============================================================================
 import importlib
@@ -17,8 +18,9 @@ from zoneinfo import ZoneInfo
 st.set_page_config(layout="wide", page_title="Institutional EMA Alignment")
 
 st.caption(
-    "Version: V6 2026-09-12 — Institutional EMA Alignment + "
-    "Price Increase Score + Development v3 + Rejection Diagnostics"
+    "Version: V6 2026-09-15 — Institutional EMA Alignment + "
+    "Opportunity Categorization + Price Increase Score + "
+    "Development v4 + Rejection Diagnostics"
 )
 
 st.title("📈 Institutional EMA Alignment Model")
@@ -347,6 +349,56 @@ def price_increase_label(score):
     )
 
 # ============================================================
+# OPPORTUNITY CATEGORY
+# ============================================================
+
+def opportunity_category(gap_vs_prev_close):
+    """
+    Classify a QUALIFIED EMA ticker by its relationship
+    to the previous trading day's close.
+
+    Informational only. This does NOT reject or qualify a ticker.
+    """
+    try:
+        x = float(gap_vs_prev_close)
+    except (TypeError, ValueError):
+        return "Unknown"
+
+    if not np.isfinite(x):
+        return "Unknown"
+
+    if x <= -5.0:
+        return "Deep Recovery"
+    if x < -2.0:
+        return "Moderate Recovery"
+    if x <= 2.0:
+        return "Near Previous Close"
+    if x <= 5.0:
+        return "Continuation"
+    return "Extended"
+
+
+def session_phase(timestamp):
+    """Informational market-session classification."""
+    try:
+        total_minutes = timestamp.hour * 60 + timestamp.minute
+    except Exception:
+        return "Unknown"
+
+    if total_minutes < 9 * 60 + 30:
+        return "Pre-Market"
+    if total_minutes < 10 * 60 + 10:
+        return "Early Session (09:30-10:10)"
+    if total_minutes < 10 * 60 + 30:
+        return "Morning (10:10-10:30)"
+    if total_minutes < 12 * 60:
+        return "Late Morning (10:30-12:00)"
+    if total_minutes < 14 * 60:
+        return "Midday (12:00-14:00)"
+    return "Afternoon (14:00-16:00)"
+
+
+# ============================================================
 # DISPLAY COLORING
 # ============================================================
 
@@ -481,6 +533,10 @@ def _rejection_row(
         "Reason": reason,
 
         "Price": np.nan,
+
+        "Opportunity_Category": "N/A",
+
+        "Session_Phase": "N/A",
 
         "Avg_Volume_20d": np.nan,
 
@@ -1098,27 +1154,56 @@ def ema_alignment_engine(
         # ====================================================
         # DEVELOPMENT SIGNAL — DIAGNOSTIC ONLY
         # ====================================================
-        # DEVELOPMENT v3 — simplified early-transition hypothesis.
+        # DEVELOPMENT v4 — flexible early-transition hypothesis.
         #
-        # The current bar is the important event:
-        # - current close must be above EMA9
-        # - ALL previous 4 closes must be at/below EMA9
-        # - previous 4 bars may be in ANY order
-        # - price must be above EMA20
-        # - EMA9 must be at/above EMA20
-        # - EMA9 slope must be positive
-        # - EMA20 slope must be positive
+        # Allow either of these recent patterns:
+        #   A) only the current (5th) bar is above EMA9, while the
+        #      preceding 4 bars are at/below EMA9; OR
+        #   B) the 4th and 5th bars are above EMA9, while the
+        #      preceding 3 bars are at/below EMA9.
         #
-        # No requirement that the last 5 closes be strictly rising.
+        # This captures an early transition that has already held
+        # above EMA9 for two consecutive bars without requiring
+        # a single-bar crossover pattern.
+        #
         # This is DIAGNOSTIC ONLY and does not replace Strong.
+
+        # DEVELOPMENT v4 — flexible early-transition hypothesis.
+        #
+        # Allow either of these recent patterns:
+        #   A) only the current (5th) bar is above EMA9, while the
+        #      preceding 4 bars are at/below EMA9; OR
+        #   B) the 4th and 5th bars are above EMA9, while the
+        #      preceding 3 bars are at/below EMA9.
+        #
+        # This captures an early transition that has already held
+        # above EMA9 for two consecutive bars without requiring a
+        # single-bar crossover pattern.
+        recent2_above_ema9 = bool(
+            np.all(last5[-2:] > last5_ema9[-2:])
+        )
+
+        preceding3_below_ema9 = bool(
+            np.all(last5[:3] <= last5_ema9[:3])
+        )
 
         previous4_below_ema9 = bool(
             np.all(last5[:-1] <= last5_ema9[:-1])
         )
 
-        development_recent_ema9_cross = bool(
+        development_one_bar_transition = bool(
             current_price > ema9_now
             and previous4_below_ema9
+        )
+
+        development_two_bar_transition = bool(
+            recent2_above_ema9
+            and preceding3_below_ema9
+        )
+
+        development_recent_ema9_cross = bool(
+            development_one_bar_transition
+            or development_two_bar_transition
         )
 
         development_base_conditions = (
@@ -1133,6 +1218,13 @@ def ema_alignment_engine(
             and development_recent_ema9_cross
         )
 
+        if development_two_bar_transition:
+            development_transition_type = "2-Bar Transition"
+        elif development_one_bar_transition:
+            development_transition_type = "1-Bar Transition"
+        else:
+            development_transition_type = "None"
+
         development_reasons = []
 
         if current_price <= ema9_now:
@@ -1140,9 +1232,11 @@ def ema_alignment_engine(
                 "current price <= EMA9"
             )
 
-        if not previous4_below_ema9:
+        if not development_recent_ema9_cross:
             development_reasons.append(
-                "not all previous 4 closes are <= EMA9"
+                "recent EMA9 transition pattern not met: "
+                "requires either current bar above EMA9 with previous 4 at/below, "
+                "or bars 4-5 above EMA9 with bars 1-3 at/below"
             )
 
         if not cond_price_above_ema20:
@@ -1158,10 +1252,16 @@ def ema_alignment_engine(
             development_reasons.append("EMA20 slope not positive")
 
         if development_signal:
-            development_reason = (
-                "Current close above EMA9 after previous 4 closes "
-                "at/below EMA9, with positive EMA9/EMA20 structure"
-            )
+            if development_two_bar_transition:
+                development_reason = (
+                    "Bars 4-5 above EMA9 after bars 1-3 at/below EMA9, "
+                    "with positive EMA9/EMA20 structure"
+                )
+            else:
+                development_reason = (
+                    "Current bar above EMA9 after previous 4 bars "
+                    "at/below EMA9, with positive EMA9/EMA20 structure"
+                )
         else:
             development_reason = "; ".join(
                 development_reasons
@@ -1188,8 +1288,6 @@ def ema_alignment_engine(
             print("EMA9 slope positive:", cond_ema9_slope_pos)
             print("EMA20 slope positive:", cond_ema20_slope_pos)
             print("All last 5 closes > EMA9:", cond_last5_above_ema9)
-            print("Latest bar > bar -3:", cond_lastbar_higher_3)
-            print("Latest bar > bar -4:", cond_lastbar_higher_4)
             print("=" * 80)
 
         ema_score = 0
@@ -1296,7 +1394,7 @@ def ema_alignment_engine(
             "Development_Current_Above_EMA9":
                 (
                     "PASS"
-                    if development_recent_ema9_cross
+                    if current_price > ema9_now
                     else "FAIL"
                 ),
 
@@ -1305,7 +1403,24 @@ def ema_alignment_engine(
                     "PASS"
                     if previous4_below_ema9
                     else "FAIL"
-                )
+                ),
+
+            "Development_Recent2_Above_EMA9":
+                (
+                    "PASS"
+                    if recent2_above_ema9
+                    else "FAIL"
+                ),
+
+            "Development_Preceding3_Below_EMA9":
+                (
+                    "PASS"
+                    if preceding3_below_ema9
+                    else "FAIL"
+                ),
+
+            "Development_Transition_Type":
+                development_transition_type
         })
 
         # ====================================================
@@ -1378,10 +1493,27 @@ def ema_alignment_engine(
 
             gap_vs_prev_close = 0.0
 
+        opportunity_cat = opportunity_category(
+            gap_vs_prev_close
+        )
+
+        session_cat = session_phase(
+            intraday_df.index[-1]
+        )
+
+        r["Opportunity_Category"] = opportunity_cat
+        r["Session_Phase"] = session_cat
+
         rows.append({
 
             "Ticker":
                 ticker,
+
+            "Opportunity_Category":
+                opportunity_cat,
+
+            "Session_Phase":
+                session_cat,
 
             "Close":
                 round(
@@ -1446,7 +1578,7 @@ def ema_alignment_engine(
             "Development_Current_Above_EMA9":
                 (
                     "PASS"
-                    if development_recent_ema9_cross
+                    if current_price > ema9_now
                     else "FAIL"
                 ),
 
@@ -1456,6 +1588,23 @@ def ema_alignment_engine(
                     if previous4_below_ema9
                     else "FAIL"
                 ),
+
+            "Development_Recent2_Above_EMA9":
+                (
+                    "PASS"
+                    if recent2_above_ema9
+                    else "FAIL"
+                ),
+
+            "Development_Preceding3_Below_EMA9":
+                (
+                    "PASS"
+                    if preceding3_below_ema9
+                    else "FAIL"
+                ),
+
+            "Development_Transition_Type":
+                development_transition_type,
 
             "Avg_Volume_20d":
                 round(
@@ -1567,9 +1716,9 @@ min_price = st.number_input(
 
     "Minimum Price ($)",
 
-    value=20.0,
+    value=40.0,
 
-    min_value=20.0,
+    min_value=40.0,
 
     max_value=120.0,
 
@@ -1582,7 +1731,7 @@ max_price = st.number_input(
 
     value=120.0,
 
-    min_value=20.0,
+    min_value=40.0,
 
     max_value=120.0,
 
@@ -1877,13 +2026,14 @@ st.markdown(
 )
 
 st.caption(
-    "Development is an earlier transition hypothesis. "
+    "Development v4 is an earlier transition hypothesis. "
     "It does NOT replace the existing Strong/qualified logic. "
-    "A Development signal requires the current close to be above "
-    "EMA9, ALL previous 4 closes to be at/below their EMA9, "
-    "price above EMA20, EMA9 above EMA20, and positive EMA9/EMA20 "
-    "slopes. The previous 4 bars may be in any order. "
-    "No strictly rising 5-bar sequence is required."
+    "It allows either: (A) only the current 5th bar above EMA9 "
+    "with the previous 4 at/below EMA9, or (B) the 4th and 5th "
+    "bars above EMA9 with the first 3 at/below EMA9. "
+    "Price must also be above EMA20, EMA9 above EMA20, and both "
+    "EMA9/EMA20 slopes positive. No strictly rising 5-bar sequence "
+    "is required."
 )
 
 development_df = pd.DataFrame()
@@ -1927,6 +2077,9 @@ if not development_df.empty:
         "Price_Increase_Score",
         "Development_Current_Above_EMA9",
         "Development_Previous4_Below_EMA9",
+        "Development_Recent2_Above_EMA9",
+        "Development_Preceding3_Below_EMA9",
+        "Development_Transition_Type",
         "Last5_Rising_Trend",
         "Price_Above_EMA20",
         "EMA9_Above_EMA20",
@@ -1955,6 +2108,36 @@ if not development_df.empty:
 
 else:
     st.write("No Development candidates detected in this scan.")
+
+# ============================================================
+# OPPORTUNITY CATEGORY SUMMARY
+# ============================================================
+
+if (
+    ranking is not None
+    and not ranking.empty
+    and "Opportunity_Category" in ranking.columns
+):
+    st.markdown("### 🧭 Opportunity Category Summary")
+
+    category_summary = (
+        ranking["Opportunity_Category"]
+        .value_counts()
+        .rename_axis("Opportunity_Category")
+        .reset_index(name="Qualified_Tickers")
+    )
+
+    st.dataframe(
+        category_summary,
+        hide_index=True,
+        use_container_width=True
+    )
+
+    st.caption(
+        "This is a summary of categories among the currently qualified EMA tickers. "
+        "It is informational only and does not filter or change qualification."
+    )
+
 
 # ============================================================
 # QUALIFIED RESULTS
@@ -2014,6 +2197,22 @@ if (
         "It is **NOT a rejection filter**."
     )
 
+    st.markdown(
+        "### 🧭 Opportunity Category"
+    )
+
+    st.caption(
+        "Opportunity Category is informational only. It does NOT "
+        "change the EMA qualification rules. Deep Recovery = current "
+        "price is at least 5% below the previous trading day's close; "
+        "Moderate Recovery = more than 2% and less than 5% below; "
+        "Near Previous Close = within ±2%; Continuation = more than 2% "
+        "and up to 5% above; Extended = more than 5% above. Session "
+        "Phase identifies whether the signal occurs during the first "
+        "40 minutes or later."
+    )
+
+
 # ============================================================
 # REJECTION DIAGNOSTICS
 # ============================================================
@@ -2046,6 +2245,10 @@ if (
 
         "Price",
 
+        "Opportunity_Category",
+
+        "Session_Phase",
+
         "Avg_Volume_20d",
 
         "EMA_Score",
@@ -2075,6 +2278,12 @@ if (
         "Development_Current_Above_EMA9",
 
         "Development_Previous4_Below_EMA9",
+
+        "Development_Recent2_Above_EMA9",
+
+        "Development_Preceding3_Below_EMA9",
+
+        "Development_Transition_Type",
 
         "Last5_Rising_Trend",
 
@@ -2207,6 +2416,12 @@ if (
             st.write(
                 f"**Previous 4 closes at/below EMA9:** "
                 f"{row['Development_Previous4_Below_EMA9']}"
+            )
+
+        if "Development_Transition_Type" in row.index:
+            st.write(
+                f"**Development Transition Type:** "
+                f"{row['Development_Transition_Type']}"
             )
 
         if "Last5_Rising_Trend" in row.index:

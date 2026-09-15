@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 
-def load_and_filter_all_sources(csv_paths, min_price=20, max_price=120):
+def load_and_filter_all_sources(csv_paths, min_price=40, max_price=120):
     """
     Loops through multiple CSV data sources (NYSE, NASDAQ, etc.),
     cleans them, and combines them into one unique dataframe.
@@ -54,7 +54,7 @@ def load_and_filter_all_sources(csv_paths, min_price=20, max_price=120):
     return pd.concat(combined_dfs, ignore_index=True)
 
 
-def generate_master_universe(min_price=20, max_price=120):
+def generate_master_universe(min_price=40, max_price=120):
     # INSTRUCTION: Simply add your source data file paths to this list
     source_files = [
         "data/nasdaq_full_list.csv",
@@ -87,4 +87,4 @@ def generate_master_universe(min_price=20, max_price=120):
 
 
 if __name__ == "__main__":
-    generate_master_universe(min_price=20, max_price=120)
+    generate_master_universe(min_price=40, max_price=120)

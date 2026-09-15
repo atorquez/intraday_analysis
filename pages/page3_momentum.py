@@ -860,8 +860,8 @@ st.markdown("### 🔍 Price Boundaries Filter")
 
 min_price = st.number_input(
     "Minimum Price ($)",
-    value=20.0,
-    min_value=20.0,
+    value=40.0,
+    min_value=40.0,
     max_value=120.0,
     key="momentum_min_price"
 )
@@ -869,7 +869,7 @@ min_price = st.number_input(
 max_price = st.number_input(
     "Maximum Price ($)",
     value=120.0,
-    min_value=20.0,
+    min_value=40.0,
     max_value=120.0,
     key="momentum_max_price"
 )
