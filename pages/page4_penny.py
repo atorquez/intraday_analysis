@@ -1,10 +1,5 @@
 # ==============================================================================
-# 📈 INSTITUTIONAL EMA ALIGNMENT MODEL
-# PURPOSE:
-# Identify institutional-quality tickers showing early EMA alignment.
-# Opportunity categorization describes the price relationship to the
-# previous-day close without changing the EMA qualification logic.
-
+# 📈 PENNY MODEL
 # ==============================================================================
 import importlib
 import streamlit as st
@@ -18,14 +13,11 @@ from zoneinfo import ZoneInfo
 st.set_page_config(layout="wide", page_title="Institutional EMA Alignment")
 
 st.caption(
-    "Version: V6 2026-09-15 — Institutional EMA Alignment + "
-    "Opportunity Categorization + Price Increase Score + "
-    "Development v4 + Rejection Diagnostics"
+    "Version: V1 2026-09-17 — Penny Model"
 )
 
-st.title("📈 Institutional EMA Alignment Model")
-
-# ============================================================
+st.title("📈 Penny Model")
+#===================================================
 # MODEL PARAMETERS
 # ============================================================
 
@@ -180,29 +172,29 @@ def _load_universe():
         # UNIVERSE SOURCE DIAGNOSTIC
         # ----------------------------------------------------
 
-        st.write("### 🔎 Universe Source Diagnostic")
+        #st.write("### 🔎 Universe Source Diagnostic")
 
-        st.write("### 🐍 PYTHON ENVIRONMENT")
+        #st.write("### 🐍 PYTHON ENVIRONMENT")
 
-        st.write(
-            f"Python executable: `{sys.executable}`"
-        )
+        #st.write(
+        #    f"Python executable: `{sys.executable}`"
+        #)
 
-        st.write(
-            f"Python version: `{sys.version}`"
-        )
+        #st.write(
+        #    f"Python version: `{sys.version}`"
+        #)
 
-        st.write(
-            f"Page 5 file: **{__file__}**"
-        )
+        #st.write(
+        #    f"Page 5 file: **{__file__}**"
+        #)
 
-        st.write(
-            f"data_fetch file: **{data_fetch_module.__file__}**"
-        )
+        #st.write(
+        #    f"data_fetch file: **{data_fetch_module.__file__}**"
+        #)
 
-        st.write(
-            f"us_universe file: **{universe_module.__file__}**"
-        )
+        #st.write(
+        #    f"us_universe file: **{universe_module.__file__}**"
+        #)
 
         direct_count = len(universe_module.us_universe)
 
@@ -228,14 +220,14 @@ def _load_universe():
         # SHOW FUNCTION SOURCE
         # ----------------------------------------------------
 
-        st.write(
-            "load_universe source:"
-        )
+        #st.write(
+        #    "load_universe source:"
+        #)
 
-        st.code(
-            inspect.getsource(load_universe),
-            language="python"
-        )
+        #st.code(
+        #    inspect.getsource(load_universe),
+        #    language="python"
+        #)
 
         # ----------------------------------------------------
         # NORMALIZE
@@ -1091,6 +1083,24 @@ def ema_alignment_engine(
 
         last5_ema9 = ema9_i[-5:]
 
+        # ====================================================
+        # MICRO-SEGMENT STRENGTH FILTER (PENNY ONLY)
+        # ====================================================
+
+        # Last 3 closes
+        c5 = last5[-1]   # most recent bar
+        c4 = last5[-2]
+        c3 = last5[-3]
+
+        # Require at least +5% growth bar-to-bar
+        cond_bar5_over_bar4 = (c5 > c4 * 1.05)
+        cond_bar4_over_bar3 = (c4 > c3 * 1.05)
+
+        cond_micro_segment_strong = (
+            cond_bar5_over_bar4 and
+            cond_bar4_over_bar3
+        )
+
         # ----------------------------------------------------
         # PRICE INCREASE
         # ----------------------------------------------------
@@ -1143,13 +1153,13 @@ def ema_alignment_engine(
             )
         )
 
-        #cond_lastbar_higher_3 = bool(
-        #    last5[-1] > last5[-3]
-        #)
-
-        #cond_lastbar_higher_4 = bool(
-        #    last5[-1] > last5[-4]
-        #)
+        # Reject if micro-segment is weak
+        if not cond_micro_segment_strong:
+            r["Reason"] = (
+                "Weak micro-segment: last 3 bars do not show +5% acceleration"
+            )
+            rejection_rows.append(r)
+            continue
 
         # ====================================================
         # DEVELOPMENT SIGNAL — DIAGNOSTIC ONLY
@@ -1213,10 +1223,33 @@ def ema_alignment_engine(
             and cond_ema20_slope_pos
         )
 
+
         development_signal = bool(
             development_base_conditions
             and development_recent_ema9_cross
         )
+
+        # ====================================================
+        # DEVELOPMENT MICRO-SEGMENT ACCELERATION FILTER
+        # ====================================================
+
+        c5 = last5[-1]
+        c4 = last5[-2]
+        c3 = last5[-3]
+
+        dev_bar5_over_bar4 = (c5 > c4 * 1.05)
+        dev_bar4_over_bar3 = (c4 > c3 * 1.05)
+
+        cond_development_acceleration = (
+            dev_bar5_over_bar4 and dev_bar4_over_bar3
+        )
+
+        if development_signal and not cond_development_acceleration:
+            r["Reason"] = (
+                "Weak early development: last 3 bars do not show +5% acceleration"
+            )
+            rejection_rows.append(r)
+            continue
 
         if development_two_bar_transition:
             development_transition_type = "2-Bar Transition"
@@ -1742,24 +1775,24 @@ max_price = st.number_input(
 # PRICE SCORE INFORMATION
 # ============================================================
 
-st.markdown(
-    "### 🎯 Price Increase Reference"
-)
+#st.markdown(
+#    "### 🎯 Price Increase Reference"
+#)
 
-st.caption(
+#st.caption(
 
-    "Price Increase Score is informational/ranking only. "
+#    "Price Increase Score is informational/ranking only. "
 
-    "0 = <0.25%, "
+#    "0 = <0.25%, "
 
-    "1 = 0.25–<0.50%, "
+#    "1 = 0.25–<0.50%, "
 
-    "2 = 0.50–<1.00%, "
+#    "2 = 0.50–<1.00%, "
 
-    "3 = ≥1.00% "
+#    "3 = ≥1.00% "
 
-    "over the last 5 one-minute bars."
-)
+#    "over the last 5 one-minute bars."
+#)
 
 # ============================================================
 # RUN BUTTON
@@ -1850,28 +1883,28 @@ if run_model:
         # TEMPORARY UNIVERSE TRACE
         # ----------------------------------------------------
 
-        st.write("### 🔎 UNIVERSE TRACE")
+        #st.write("### 🔎 UNIVERSE TRACE")
 
-        st.write(
-            f"Page 5 executing file: `{__file__}`"
-        )
+        #st.write(
+        #    f"Page 5 executing file: `{__file__}`"
+        #)
 
-        st.write(
-            f"Universe variable type: `{type(universe_list)}`"
-        )
+        #st.write(
+        #    f"Universe variable type: `{type(universe_list)}`"
+        #)
 
-        st.write(
-            f"Universe variable length: "
-            f"**{len(universe_list):,}**"
-        )
+        #st.write(
+        #    f"Universe variable length: "
+        #    f"**{len(universe_list):,}**"
+        #)
 
-        st.write(
-            f"First 10 tickers: `{universe_list[:10]}`"
-        )
+        #st.write(
+        #    f"First 10 tickers: `{universe_list[:10]}`"
+        #)
 
-        st.write(
-            f"Last 10 tickers: `{universe_list[-10:]}`"
-        )
+        #st.write(
+        #    f"Last 10 tickers: `{universe_list[-10:]}`"
+        #)
 
         # ----------------------------------------------------
         # MASTER UNIVERSE COUNT
