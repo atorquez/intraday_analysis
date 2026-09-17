@@ -488,16 +488,16 @@ st.markdown("### 🔍 Price Boundaries Filter")
 
 min_price = st.number_input(
     "Minimum Price ($)",
-    value=40.0,
-    min_value=0.0,
-    max_value=500.0
+    value=1.0,
+    min_value=1.0,
+    max_value=10.0
 )
 
 max_price = st.number_input(
     "Maximum Price ($)",
-    value=120.0,
-    min_value=0.0,
-    max_value=500.0
+    value=10.0,
+    min_value=1.0,
+    max_value=10.0
 )
 
 st.markdown("### 🎛️ Momentum Score Filter")

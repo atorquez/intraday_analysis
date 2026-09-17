@@ -32,7 +32,7 @@ st.title("📈 Institutional EMA Alignment Model")
 MIN_DAILY_HISTORY = 40
 MIN_INTRADAY_BARS = 5
 MIN_REAL_DAY_BARS = 10
-MIN_AVG_VOLUME_20D = 250000
+MIN_AVG_VOLUME_20D = 80000
 
 # ============================================================
 # SESSION STATE
