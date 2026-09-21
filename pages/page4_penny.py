@@ -1,2554 +1,939 @@
 # ==============================================================================
-# 📈 PENNY MODEL
+# 📈 PENNY MODEL — Clean & Patched Version (Standalone Page 4)
 # ==============================================================================
-import importlib
 import streamlit as st
-import time
 import numpy as np
 import pandas as pd
 import yfinance as yf
+import importlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-st.set_page_config(layout="wide", page_title="Institutional EMA Alignment")
-
-st.caption(
-    "Version: V1 2026-09-17 — Penny Model"
-)
-
+# ==============================================================================
+# PAGE CONFIG
+# ==============================================================================
+st.set_page_config(layout="wide", page_title="Penny Model")
+st.caption("Version: V3 — Daily-first pre-filter, threaded intraday fetch")
 st.title("📈 Penny Model")
-#===================================================
-# MODEL PARAMETERS
-# ============================================================
 
+# ==============================================================================
+# MODEL PARAMETERS
+# ==============================================================================
 MIN_DAILY_HISTORY = 40
 MIN_INTRADAY_BARS = 5
 MIN_REAL_DAY_BARS = 10
 MIN_AVG_VOLUME_20D = 80000
 
-# ============================================================
-# SESSION STATE
-# ============================================================
+# How much slack to give the daily-close price filter before fetching
+# intraday data. Intraday price can drift from the prior daily close, so
+# the pre-filter range is intentionally a bit wider than the user's actual
+# min/max — the final, exact price check still happens later using the
+# real intraday price. This just avoids fetching minute bars for tickers
+# that have no realistic chance of landing in range.
+PREFILTER_PRICE_BUFFER_PCT = 0.15  # 15% slack on each side
 
+# Max concurrent Yahoo requests for the intraday fetch stage.
+INTRADAY_MAX_WORKERS = 20
+
+# Where the top-5-per-run log persists across separate script runs (not
+# just within one browser session). Lives next to this script file so it
+# works the same whether launched via `streamlit run` from the terminal
+# or clicked through the sidebar.
+import os
+TOP5_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "top5_log.csv")
+TOP5_LOG_COLUMNS = [
+    "Run_Timestamp_ET", "Ticker", "Close", "Price_Increase_%_5Bars",
+    "Status", "Development_Signal", "Latest_Real_Day", "Stale_Bars_Last5",
+]
+
+# ==============================================================================
+# SESSION STATE
+# ==============================================================================
 if "ema_alignment_raw_ranking" not in st.session_state:
     st.session_state["ema_alignment_raw_ranking"] = pd.DataFrame()
 
 if "ema_alignment_rejections" not in st.session_state:
     st.session_state["ema_alignment_rejections"] = pd.DataFrame()
 
-# ============================================================
-# DATAFRAME HELPERS
-# ============================================================
-
+# ==============================================================================
+# HELPERS
+# ==============================================================================
 def _flatten_columns(df):
-
     if df is None or df.empty:
         return df
-
     if isinstance(df.columns, pd.MultiIndex):
-
-        if df.columns.nlevels == 2:
-
-            known_fields = {
-                "Open",
-                "High",
-                "Low",
-                "Close",
-                "Adj Close",
-                "Volume"
-            }
-
-            level_0 = df.columns.get_level_values(0)
-            level_1 = df.columns.get_level_values(1)
-
-            if all(x in known_fields for x in level_0):
-                df.columns = level_0
-
-            elif all(x in known_fields for x in level_1):
-                df.columns = level_1
-
+        level0 = df.columns.get_level_values(0)
+        level1 = df.columns.get_level_values(1)
+        known = {"Open", "High", "Low", "Close", "Adj Close", "Volume"}
+        if all(x in known for x in level0):
+            df.columns = level0
+        elif all(x in known for x in level1):
+            df.columns = level1
     return df
 
 def _extract_ticker_slice(batch, ticker):
-
     if batch is None or batch.empty:
-        if str(ticker).upper() == "TEM":
-            print("TEM DIAGNOSTIC: batch is None or empty")
         return pd.DataFrame()
 
-    ticker = str(ticker).strip().upper()
+    ticker = str(ticker).upper()
 
     if not isinstance(batch.columns, pd.MultiIndex):
-        result = _flatten_columns(batch.copy())
-        if ticker == "TEM":
-            print("TEM DIAGNOSTIC: non-MultiIndex batch")
-            print("TEM extracted shape:", result.shape)
-            print("TEM columns:", list(result.columns))
-            print(result.tail(10))
-        return result
+        return _flatten_columns(batch.copy())
 
     try:
-        level0 = set(str(x).strip().upper()
-                     for x in batch.columns.get_level_values(0))
-        level1 = set(str(x).strip().upper()
-                     for x in batch.columns.get_level_values(1))
+        if ticker in batch.columns.get_level_values(0):
+            return _flatten_columns(batch[ticker].copy())
+    except Exception:
+        pass
 
-        if ticker in level0:
-            result = batch[ticker].copy()
-        elif ticker in level1:
-            result = batch.xs(
-                ticker, axis=1, level=1, drop_level=True
-            ).copy()
-        else:
-            if ticker == "TEM":
-                print("TEM DIAGNOSTIC: ticker not found in either MultiIndex level")
-                print("Level 0 sample:", list(level0)[:20])
-                print("Level 1 sample:", list(level1)[:20])
-            return pd.DataFrame()
+    try:
+        if ticker in batch.columns.get_level_values(1):
+            return _flatten_columns(
+                batch.xs(ticker, axis=1, level=1, drop_level=True).copy()
+            )
+    except Exception:
+        pass
 
-        result = _flatten_columns(result)
-
-        if ticker == "TEM":
-            print("TEM DIAGNOSTIC: MultiIndex extraction successful")
-            print("TEM extracted shape:", result.shape)
-            print("TEM columns:", list(result.columns))
-            if not result.empty:
-                print("TEM first index:", result.index.min())
-                print("TEM last index:", result.index.max())
-                print("TEM tail:")
-                print(result.tail(10))
-
-        return result
-
-    except Exception as e:
-        if ticker == "TEM":
-            print("TEM DIAGNOSTIC: extraction exception:", repr(e))
-            print("Batch columns:", batch.columns)
-        return pd.DataFrame()
-
+    return pd.DataFrame()
 
 def _to_eastern_index(df):
-
     df = df.copy()
-
     idx = pd.DatetimeIndex(df.index)
-
     eastern = ZoneInfo("America/New_York")
-
     if idx.tz is not None:
-        idx = idx.tz_convert(eastern)
-
+        df.index = idx.tz_convert(eastern)
     else:
-        idx = idx.tz_localize(eastern)
-
-    df.index = idx
-
+        df.index = idx.tz_localize(eastern)
     return df
 
-# ============================================================
-# UNIVERSE
-# ============================================================
-
 def _load_universe():
-
     try:
-        import inspect
-        import sys
-        import importlib
         import utils.data_fetch as data_fetch_module
         import data.us_universe_list as universe_module
-
-        # ----------------------------------------------------
-        # TEMPORARY FORCE RELOAD
-        # ----------------------------------------------------
-
         universe_module = importlib.reload(universe_module)
         data_fetch_module = importlib.reload(data_fetch_module)
-
-        # Get load_universe AFTER reloading data_fetch
         load_universe = data_fetch_module.load_universe
-
-        # ----------------------------------------------------
-        # UNIVERSE SOURCE DIAGNOSTIC
-        # ----------------------------------------------------
-
-        #st.write("### 🔎 Universe Source Diagnostic")
-
-        #st.write("### 🐍 PYTHON ENVIRONMENT")
-
-        #st.write(
-        #    f"Python executable: `{sys.executable}`"
-        #)
-
-        #st.write(
-        #    f"Python version: `{sys.version}`"
-        #)
-
-        #st.write(
-        #    f"Page 5 file: **{__file__}**"
-        #)
-
-        #st.write(
-        #    f"data_fetch file: **{data_fetch_module.__file__}**"
-        #)
-
-        #st.write(
-        #    f"us_universe file: **{universe_module.__file__}**"
-        #)
-
-        direct_count = len(universe_module.us_universe)
-
-        st.write(
-            f"Direct us_universe length: **{direct_count:,}**"
-        )
-
-        # ----------------------------------------------------
-        # LOAD UNIVERSE
-        # ----------------------------------------------------
-
         tickers = load_universe()
+
+        st.write("Universe size:", len(tickers))
 
         if tickers is None:
             st.error("load_universe() returned None.")
             return []
-
-        st.write(
-            f"load_universe() length: **{len(tickers):,}**"
-        )
-
-        # ----------------------------------------------------
-        # SHOW FUNCTION SOURCE
-        # ----------------------------------------------------
-
-        #st.write(
-        #    "load_universe source:"
-        #)
-
-        #st.code(
-        #    inspect.getsource(load_universe),
-        #    language="python"
-        #)
-
-        # ----------------------------------------------------
-        # NORMALIZE
-        # ----------------------------------------------------
-
-        normalized_tickers = sorted(
-            set(
-                str(x).strip().upper()
-                for x in tickers
-                if x
-            )
-        )
-
-        st.write(
-            f"Normalized universe length: "
-            f"**{len(normalized_tickers):,}**"
-        )
-
-        return normalized_tickers
-
+        normalized = sorted(set(str(x).strip().upper() for x in tickers if x))
+        return normalized
     except Exception as e:
-
-        st.error(
-            "Unable to load the master US universe "
-            "from utils/data_fetch.py: "
-            f"{e}"
-        )
-
+        st.error(f"Unable to load universe: {e}")
         return []
 
-# ============================================================
-# MARKET DATA
-# ============================================================
+def _load_movers():
+    """Load the trader's curated watchlist of known pre-market/after-hours
+    movers from data/movers_list.py — a small, manually-maintained module
+    mirroring the pattern of data/us_universe_list.py. Reloaded fresh every
+    run so editing the movers list takes effect immediately, no restart
+    needed. Missing module or empty list is NOT an error — mover tagging
+    is an optional overlay on top of the full-universe scan, so the whole
+    page should keep working fine with zero movers loaded.
 
-@st.cache_data(ttl=120, show_spinner=False)
-def fetch_clean_market_batch(tickers_tuple):
-
-    ticker_list = list(tickers_tuple)
-
-    if not ticker_list:
-        return pd.DataFrame(), pd.DataFrame()
-
+    Expected file: data/movers_list.py
+        def load_movers():
+            return ["GLND", "GRML", "ABCD"]  # your curated list for today
+    """
     try:
-
-        raw_daily = yf.download(
-            ticker_list,
-            period="3mo",
-            interval="1d",
-            group_by="ticker",
-            auto_adjust=False,
-            progress=False,
-            threads=True
-        )
-
-        raw_intra = yf.download(
-            ticker_list,
-            period="1d",
-            interval="1m",
-            group_by="ticker",
-            auto_adjust=False,
-            progress=False,
-            threads=True
-        )
-
-        return raw_daily, raw_intra
-
+        import data.movers_list as movers_module
+        movers_module = importlib.reload(movers_module)
+        load_movers = movers_module.load_movers
+        movers = load_movers()
+        if movers is None:
+            return []
+        return sorted(set(str(x).strip().upper() for x in movers if x))
+    except ModuleNotFoundError:
+        # Expected until the trader creates data/movers_list.py — silent,
+        # not an error, since mover tagging is optional.
+        return []
     except Exception as e:
+        st.warning(f"Movers list found but couldn't be loaded: {e}")
+        return []
 
-        st.error(
-            f"Market data download failed: {e}"
-        )
-
-        return pd.DataFrame(), pd.DataFrame()
-
-# ============================================================
-# PRICE INCREASE SCORE
-# ============================================================
-
-def price_increase_score(price_increase_pct):
-
-    try:
-        x = float(price_increase_pct)
-
-    except (TypeError, ValueError):
-        return 0
-
-    if not np.isfinite(x):
-        return 0
-
-    if x >= 1.00:
-        return 3
-
-    if x >= 0.50:
-        return 2
-
-    if x >= 0.25:
-        return 1
-
-    return 0
-
-def price_increase_label(score):
-
+def _rejection_row(ticker, reason=""):
     return {
-        3: "Strong",
-        2: "Good",
-        1: "Developing",
-        0: "Weak"
-    }.get(
-        int(score),
-        "Weak"
-    )
-
-# ============================================================
-# OPPORTUNITY CATEGORY
-# ============================================================
-
-def opportunity_category(gap_vs_prev_close):
-    """
-    Classify a QUALIFIED EMA ticker by its relationship
-    to the previous trading day's close.
-
-    Informational only. This does NOT reject or qualify a ticker.
-    """
-    try:
-        x = float(gap_vs_prev_close)
-    except (TypeError, ValueError):
-        return "Unknown"
-
-    if not np.isfinite(x):
-        return "Unknown"
-
-    if x <= -5.0:
-        return "Deep Recovery"
-    if x < -2.0:
-        return "Moderate Recovery"
-    if x <= 2.0:
-        return "Near Previous Close"
-    if x <= 5.0:
-        return "Continuation"
-    return "Extended"
-
-
-def session_phase(timestamp):
-    """Informational market-session classification."""
-    try:
-        total_minutes = timestamp.hour * 60 + timestamp.minute
-    except Exception:
-        return "Unknown"
-
-    if total_minutes < 9 * 60 + 30:
-        return "Pre-Market"
-    if total_minutes < 10 * 60 + 10:
-        return "Early Session (09:30-10:10)"
-    if total_minutes < 10 * 60 + 30:
-        return "Morning (10:10-10:30)"
-    if total_minutes < 12 * 60:
-        return "Late Morning (10:30-12:00)"
-    if total_minutes < 14 * 60:
-        return "Midday (12:00-14:00)"
-    return "Afternoon (14:00-16:00)"
-
-
-# ============================================================
-# DISPLAY COLORING
-# ============================================================
-
-def color_score_columns(df):
-
-    style = pd.DataFrame(
-        "",
-        index=df.index,
-        columns=df.columns
-    )
-
-    # --------------------------------------------------------
-    # PRICE SCORE
-    # --------------------------------------------------------
-
-    if "Price_Increase_Score" in df.columns:
-
-        for i, v in enumerate(
-            df["Price_Increase_Score"]
-        ):
-
-            try:
-                v = float(v)
-
-            except Exception:
-                continue
-
-            if v >= 3:
-
-                css = (
-                    "background-color:#006400;"
-                    "color:white;"
-                    "font-weight:bold;"
-                )
-
-            elif v >= 2:
-
-                css = (
-                    "background-color:#32CD32;"
-                    "color:black;"
-                    "font-weight:bold;"
-                )
-
-            elif v >= 1:
-
-                css = (
-                    "background-color:#FFD700;"
-                    "color:black;"
-                    "font-weight:bold;"
-                )
-
-            else:
-
-                css = (
-                    "background-color:#FF9800;"
-                    "color:white;"
-                )
-
-            style.iloc[
-                i,
-                df.columns.get_loc(
-                    "Price_Increase_Score"
-                )
-            ] = css
-
-    # --------------------------------------------------------
-    # PRICE LABEL
-    # --------------------------------------------------------
-
-    if "Price_Increase_Label" in df.columns:
-
-        for i, v in enumerate(
-            df["Price_Increase_Label"]
-        ):
-
-            if v == "Strong":
-
-                css = (
-                    "background-color:#006400;"
-                    "color:white;"
-                    "font-weight:bold;"
-                )
-
-            elif v == "Good":
-
-                css = (
-                    "background-color:#32CD32;"
-                    "color:black;"
-                    "font-weight:bold;"
-                )
-
-            elif v == "Developing":
-
-                css = (
-                    "background-color:#FFD700;"
-                    "color:black;"
-                    "font-weight:bold;"
-                )
-
-            else:
-
-                css = (
-                    "background-color:#FF9800;"
-                    "color:white;"
-                )
-
-            style.iloc[
-                i,
-                df.columns.get_loc(
-                    "Price_Increase_Label"
-                )
-            ] = css
-
-    return style
-
-# ============================================================
-# REJECTION ROW TEMPLATE
-# ============================================================
-
-def _rejection_row(
-    ticker,
-    status="REJECTED",
-    reason=""
-):
-
-    return {
-
         "Ticker": ticker,
-
-        "Status": status,
-
+        "Status": "REJECTED",
         "Reason": reason,
-
         "Price": np.nan,
-
         "Opportunity_Category": "N/A",
-
         "Session_Phase": "N/A",
-
         "Avg_Volume_20d": np.nan,
-
         "EMA_Score": np.nan,
-
         "Price_Increase_%_5Bars": np.nan,
-
         "Price_Increase_Score": np.nan,
-
-        "Price_Above_EMA9": "N/A",
-
-        "Price_Above_EMA20": "N/A",
-
-        "EMA9_Above_EMA20": "N/A",
-
-        "EMA9_Slope_Pos": "N/A",
-
-        "EMA20_Slope_Pos": "N/A",
-
-        "Last5_Above_EMA9": "N/A",
-
-        "LastBar_Higher_3": "N/A",
-
-        "LastBar_Higher_4": "N/A",
-
+        "Price_Increase_Label": "N/A",
         "Development_Signal": "N/A",
-
         "Development_Reason": "N/A",
-
-        "Development_Current_Above_EMA9": "N/A",
-
-        "Last5_Rising_Trend": "N/A",
-
-        "Daily_Data": "N/A",
-
-        "Intraday_Data": "N/A",
-
-        "Latest_Real_Day": "N/A"
+        "Latest_Real_Day": "N/A",
+        "Stale_Bars_Last5": np.nan,
     }
 
-# ============================================================
-# EMA ALIGNMENT ENGINE
-# ============================================================
+def log_top5(ema_only_df, log_path=TOP5_LOG_PATH, top_n=5):
+    """Append the current run's top-N tickers (by Price_Increase_%_5Bars,
+    which ema_only_df is already sorted by descending) to a persistent CSV
+    log, tagged with the run's Eastern-time timestamp. Each run adds a new
+    batch of rows on top of prior runs — this is a running history, not a
+    snapshot that gets overwritten, so a trader watching the log doesn't
+    need to keep separate paper notes for "what showed up 3 minutes ago."
+    """
+    if ema_only_df is None or ema_only_df.empty:
+        return 0
 
-def ema_alignment_engine(
-    tickers,
-    batch_daily,
-    batch_intra,
-    min_price,
-    max_price
-):
+    run_ts = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S %Z")
 
-    rows = []
+    top = ema_only_df.head(top_n).copy()
+    entry = pd.DataFrame({
+        "Run_Timestamp_ET": run_ts,
+        "Ticker": top["Ticker"].values,
+        "Close": top["Close"].values,
+        "Price_Increase_%_5Bars": top["Price_Increase_%_5Bars"].values,
+        "Status": top["Status"].values,
+        "Development_Signal": top["Development_Signal"].values,
+        "Latest_Real_Day": top["Latest_Real_Day"].values,
+        "Stale_Bars_Last5": top["Stale_Bars_Last5"].values,
+    })
 
-    rejection_rows = []
+    file_exists = os.path.exists(log_path)
+    entry.to_csv(log_path, mode="a", header=not file_exists, index=False)
+    return len(entry)
 
-    # ========================================================
-    # NO DAILY DATA
-    # ========================================================
+def reset_top5_log(log_path=TOP5_LOG_PATH):
+    """Wipe the log back to an empty file with just the header row."""
+    pd.DataFrame(columns=TOP5_LOG_COLUMNS).to_csv(log_path, index=False)
 
-    if batch_daily is None or batch_daily.empty:
-
-        for ticker in tickers:
-
-            rejection_rows.append(
-                _rejection_row(
-                    ticker,
-                    reason="No daily data returned"
-                )
-            )
-
-        return (
-            pd.DataFrame(),
-            pd.DataFrame(rejection_rows)
-        )
-
-    # ========================================================
-    # NO INTRADAY DATA
-    # ========================================================
-
-    if batch_intra is None or batch_intra.empty:
-
-        for ticker in tickers:
-
-            rejection_rows.append(
-                _rejection_row(
-                    ticker,
-                    reason="No intraday data returned"
-                )
-            )
-
-        return (
-            pd.DataFrame(),
-            pd.DataFrame(rejection_rows)
-        )
-
-    # ========================================================
-    # DETERMINE AVAILABLE TICKERS
-    # ========================================================
-
+def load_top5_log(log_path=TOP5_LOG_PATH):
+    if not os.path.exists(log_path):
+        return pd.DataFrame(columns=TOP5_LOG_COLUMNS)
     try:
-
-        available_daily = set(
-            batch_daily.columns.get_level_values(0)
-        )
-
-        available_intra = set(
-            batch_intra.columns.get_level_values(0)
-        )
-
-        active_pool = sorted(
-            set(tickers)
-            .intersection(available_daily)
-            .intersection(available_intra)
-        )
-
+        return pd.read_csv(log_path)
     except Exception:
+        return pd.DataFrame(columns=TOP5_LOG_COLUMNS)
 
-        active_pool = sorted(
-            set(tickers)
+# ==============================================================================
+# MARKET DATA
+# ==============================================================================
+@st.cache_data(ttl=120, show_spinner=False)
+def fetch_daily_batch(tickers_tuple):
+    """One batched call for daily history across the whole universe.
+    This is cheap regardless of universe size, so it always runs on the
+    full ticker list — the expensive per-ticker intraday fetch below is
+    what we shrink with the pre-filter."""
+    tickers = list(tickers_tuple)
+    if not tickers:
+        return pd.DataFrame()
+    try:
+        daily = yf.download(
+            tickers, period="3mo", interval="1d",
+            group_by="ticker", auto_adjust=False,
+            progress=False, threads=True
         )
+        return daily
+    except Exception:
+        return pd.DataFrame()
 
-    # ========================================================
-    # TICKERS MISSING FROM YAHOO DATA
-    # ========================================================
 
-    active_set = set(active_pool)
+@st.cache_data(ttl=120, show_spinner=False)
+def fetch_intraday_batch(tickers_tuple, max_workers=INTRADAY_MAX_WORKERS):
+    """Threaded, per-ticker intraday fetch — call this ONLY with the
+    pre-filtered candidate list, not the full universe. Yahoo has no
+    reliable batched minute-bar endpoint across arbitrary tickers, so this
+    stays per-ticker, but running the requests concurrently instead of
+    sequentially cuts wall-clock time roughly by the worker count, and
+    shrinking the input list first cuts it further (and avoids Yahoo
+    rate-limiting on 1,000+ back-to-back requests)."""
+    tickers = list(tickers_tuple)
+    if not tickers:
+        return pd.DataFrame()
 
-    for ticker in sorted(
-        set(tickers) - active_set
-    ):
+    def _fetch_one(t):
+        try:
+            df = yf.download(t, period="1d", interval="1m", progress=False)
+        except Exception:
+            df = pd.DataFrame()
+        return t, df
 
+    intra_dict = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch_one, t): t for t in tickers}
+        for future in as_completed(futures):
+            t, df = future.result()
+
+            # Some tickers come back empty (delisted, no data, request
+            # failure, etc.). An empty DataFrame's default index is
+            # tz-naive, while every ticker that DID return data has a
+            # tz-aware DatetimeIndex — mixing the two makes pd.concat
+            # below raise "Cannot join tz-naive with tz-aware
+            # DatetimeIndex". Simplest fix: just don't include empty
+            # frames. Any ticker missing from intra_dict is picked up
+            # downstream as "Ticker missing from Yahoo data" anyway.
+            if df is None or df.empty:
+                continue
+
+            # Extra safety: if a non-empty frame somehow comes back
+            # tz-naive (has happened with some yfinance versions/edge
+            # cases), localize it to UTC so every frame in the dict
+            # shares a consistent tz-aware index before concatenation.
+            try:
+                if df.index.tz is None:
+                    df = df.tz_localize("UTC")
+            except (TypeError, AttributeError):
+                continue
+
+            intra_dict[t] = df
+
+    if not intra_dict:
+        return pd.DataFrame()
+
+    return pd.concat(intra_dict, axis=1)
+
+
+def daily_prefilter(tickers, daily_batch, min_price, max_price):
+    """Use the already-fetched daily batch (free — no extra network calls)
+    to shrink the universe down to tickers worth fetching intraday data
+    for. Filters on: daily history depth, prior-close price roughly in
+    range, and 20-day average volume. This is the step that makes the
+    model fast enough to re-run every 2-3 minutes: it turns "1,043
+    sequential minute-bar fetches" into "N sequential minute-bar fetches,"
+    where N is usually a small fraction of the universe.
+
+    Returns (candidates: list[str], prefilter_rejects: list[dict]).
+    """
+    candidates = []
+    prefilter_rejects = []
+
+    if daily_batch.empty:
+        for t in tickers:
+            prefilter_rejects.append(_rejection_row(t, "No daily data"))
+        return candidates, prefilter_rejects
+
+    lo = min_price * (1 - PREFILTER_PRICE_BUFFER_PCT)
+    hi = max_price * (1 + PREFILTER_PRICE_BUFFER_PCT)
+
+    for ticker in tickers:
+        daily = _flatten_columns(_extract_ticker_slice(daily_batch, ticker))
+
+        if daily.empty:
+            prefilter_rejects.append(_rejection_row(ticker, "No daily data"))
+            continue
+
+        daily = daily.dropna(subset=["Close"])
+
+        if len(daily) < MIN_DAILY_HISTORY:
+            prefilter_rejects.append(_rejection_row(ticker, "Insufficient daily history"))
+            continue
+
+        last_close = pd.to_numeric(daily["Close"], errors="coerce").dropna()
+        if last_close.empty:
+            prefilter_rejects.append(_rejection_row(ticker, "No valid daily close"))
+            continue
+        last_close = float(last_close.values[-1])
+
+        if last_close < lo or last_close > hi:
+            prefilter_rejects.append(_rejection_row(ticker, "Price outside range (daily pre-filter)"))
+            continue
+
+        vol = pd.to_numeric(daily["Volume"], errors="coerce").dropna().values.astype(float)
+        if len(vol) < 20:
+            prefilter_rejects.append(_rejection_row(ticker, "Insufficient volume history"))
+            continue
+
+        avg_vol = float(np.mean(vol[-20:]))
+        if avg_vol < MIN_AVG_VOLUME_20D:
+            prefilter_rejects.append(_rejection_row(ticker, "Low volume (daily pre-filter)"))
+            continue
+
+        candidates.append(ticker)
+
+    return candidates, prefilter_rejects
+
+# ==============================================================================
+# SCORING
+# ==============================================================================
+def price_increase_score(pct):
+    try:
+        x = float(pct)
+    except Exception:
+        return 0
+    if x >= 1.0: return 3
+    if x >= 0.5: return 2
+    if x >= 0.25: return 1
+    return 0
+
+def opportunity_category(gap):
+    try:
+        x = float(gap)
+    except Exception:
+        return "Unknown"
+    if x <= -5: return "Deep Recovery"
+    if x < -2: return "Moderate Recovery"
+    if x <= 2: return "Near Previous Close"
+    if x <= 5: return "Continuation"
+    return "Extended"
+
+def session_phase(ts):
+    m = ts.hour * 60 + ts.minute
+    if m < 570: return "Pre-Market"
+    if m < 610: return "Early Session"
+    if m < 630: return "Morning"
+    if m < 720: return "Late Morning"
+    if m < 840: return "Midday"
+    return "Afternoon"
+
+# ==============================================================================
+# EMA ALIGNMENT ENGINE
+# ==============================================================================
+def ema_alignment_engine(tickers, daily_batch, intra_batch, min_price, max_price, max_stale_bars_last5=2):
+    rows = []
+    rejects = []
+    MAX_STALE_BARS_LAST5 = max_stale_bars_last5
+
+    if daily_batch.empty:
+        for t in tickers:
+            rejects.append(_rejection_row(t, "No daily data"))
+        return pd.DataFrame(), pd.DataFrame(rejects)
+
+    if intra_batch.empty:
+        for t in tickers:
+            rejects.append(_rejection_row(t, "No intraday data"))
+        return pd.DataFrame(), pd.DataFrame(rejects)
+
+    # --- Pre-filter tickers missing from the Yahoo batch entirely -----------
+    # FIX: previously referenced undefined `daily`/`intra` (only the params
+    # `daily_batch`/`intra_batch` existed at this point), which raised a
+    # NameError caught by the bare except below and silently fell back to
+    # `active = sorted(tickers)` every single run. Now correctly checks the
+    # actual batch frames passed into the function.
+    try:
+        available_daily = set(daily_batch.columns.get_level_values(0))
+        available_intra = set(intra_batch.columns.get_level_values(0))
+        active = sorted(set(tickers).intersection(available_daily).intersection(available_intra))
+    except Exception:
+        active = sorted(tickers)
+
+    for t in sorted(set(tickers) - set(active)):
+        rejects.append(_rejection_row(t, "Ticker missing from Yahoo data"))
+
+    for ticker in active:
         r = _rejection_row(ticker)
 
-        r["Reason"] = (
-            "Ticker missing from daily or "
-            "intraday Yahoo data"
-        )
+        daily = _flatten_columns(_extract_ticker_slice(daily_batch, ticker))
+        intra = _flatten_columns(_extract_ticker_slice(intra_batch, ticker))
 
-        rejection_rows.append(r)
-
-    # ========================================================
-    # PROCESS EACH TICKER
-    # ========================================================
-
-    for ticker in active_pool:
-
-        r = _rejection_row(ticker)
-
-        # ----------------------------------------------------
-        # EXTRACT DATA
-        # ----------------------------------------------------
-
-        daily_df = _flatten_columns(
-            _extract_ticker_slice(
-                batch_daily,
-                ticker
-            )
-        )
-
-        intraday_df = _flatten_columns(
-            _extract_ticker_slice(
-                batch_intra,
-                ticker
-            )
-        )
-
-        if str(ticker).upper() == "TEM":
-            print("\n" + "=" * 80)
-            print("TEM DATA DIAGNOSTIC")
-            print("=" * 80)
-            print("Daily rows after extraction:", len(daily_df))
-            print("Intraday rows after extraction:", len(intraday_df))
-            print("Daily columns:", list(daily_df.columns))
-            print("Intraday columns:", list(intraday_df.columns))
-            if not daily_df.empty:
-                print("Daily first index:", daily_df.index.min())
-                print("Daily last index:", daily_df.index.max())
-                print(daily_df.tail(5))
-            if not intraday_df.empty:
-                print("Intraday first index:", intraday_df.index.min())
-                print("Intraday last index:", intraday_df.index.max())
-                print(intraday_df.tail(10))
-            print("=" * 80)
-
-
-
-        r["Daily_Data"] = (
-            "OK"
-            if not daily_df.empty
-            else "Missing"
-        )
-
-        r["Intraday_Data"] = (
-            "OK"
-            if not intraday_df.empty
-            else "Missing"
-        )
-
-        # ----------------------------------------------------
-        # EMPTY DATA
-        # ----------------------------------------------------
-
-        if daily_df.empty:
-
-            r["Reason"] = "Daily data empty"
-
-            rejection_rows.append(r)
-
+        if daily.empty:
+            r["Reason"] = "Daily empty"
+            rejects.append(r)
             continue
 
-        if intraday_df.empty:
-
-            r["Reason"] = "Intraday data empty"
-
-            rejection_rows.append(r)
-
+        if intra.empty:
+            r["Reason"] = "Intraday empty"
+            rejects.append(r)
             continue
 
-        # ----------------------------------------------------
-        # REQUIRED COLUMNS
-        # ----------------------------------------------------
+        daily = daily.dropna(subset=["Close"])
+        intra = intra[intra["Close"].notna() | intra["Open"].notna()]
 
-        if "Close" not in daily_df.columns:
-
-            r["Reason"] = (
-                "Daily Close column missing"
-            )
-
-            rejection_rows.append(r)
-
+        if len(daily) < MIN_DAILY_HISTORY:
+            r["Reason"] = "Insufficient daily history"
+            rejects.append(r)
             continue
 
-        if "Close" not in intraday_df.columns:
+        intra = _to_eastern_index(intra).sort_index()
 
-            r["Reason"] = (
-                "Intraday Close column missing"
-            )
+        intra_regular = intra.between_time("09:30", "16:00")
+        intra_regular = intra_regular.loc[~intra_regular.index.duplicated(keep='last')]
 
-            rejection_rows.append(r)
-
+        # REGULAR-HOURS ONLY — no extended-hours fallback
+        if len(intra_regular) < MIN_REAL_DAY_BARS:
+            r["Reason"] = f"Insufficient regular-hours bars ({len(intra_regular)})"
+            rejects.append(r)
             continue
 
-        # ----------------------------------------------------
-        # CLEAN CLOSE DATA
-        # ----------------------------------------------------
+        intra_day = intra_regular
 
-        daily_df = daily_df.dropna(
-            subset=["Close"]
-        )
-
-        intraday_df = intraday_df.dropna(
-            subset=["Close"]
-        )
-
-
-        r["Daily_Data"] = (
-            f"OK ({len(daily_df)} rows)"
-        )
-
-        r["Intraday_Data"] = (
-            f"OK ({len(intraday_df)} rows)"
-        )
-
-        # ----------------------------------------------------
-        # DAILY HISTORY
-        # ----------------------------------------------------
-
-        if len(daily_df) < MIN_DAILY_HISTORY:
-
-            r["Reason"] = (
-                f"Daily history below "
-                f"{MIN_DAILY_HISTORY} rows"
-            )
-
-            rejection_rows.append(r)
-
+        if intra_day.empty:
+            r["Reason"] = "No intraday bars (REGULAR)"
+            rejects.append(r)
             continue
 
-        # ----------------------------------------------------
-        # CONVERT INTRADAY TO EASTERN
-        # ----------------------------------------------------
+        # Determine eligible regular-hours trading days
+        day_counts = pd.Series(intra_day.index.date).value_counts()
 
-        intraday_df = _to_eastern_index(
-            intraday_df
-        ).sort_index()
+        # Only accept days with enough regular-hours bars
+        eligible = sorted(day_counts[day_counts >= MIN_REAL_DAY_BARS].index)
 
-        # ----------------------------------------------------
-        # REGULAR SESSION ONLY
-        # ----------------------------------------------------
-
-        intraday_df = intraday_df.between_time(
-            "09:30",
-            "16:00"
-        )
-
-        if intraday_df.empty:
-
-            r["Reason"] = (
-                "No regular-session intraday bars"
-            )
-
-            rejection_rows.append(r)
-
+        if not eligible:
+            r["Reason"] = "No eligible regular-hours trading day"
+            rejects.append(r)
             continue
 
-        # ----------------------------------------------------
-        # FIND REAL TRADING DAY
-        # ----------------------------------------------------
+        latest_day = eligible[-1]
 
-        day_counts = pd.Series(
-            intraday_df.index.date
-        ).value_counts()
+        # Filter intraday data to the latest eligible day
+        intra = intra_day[intra_day.index.date == latest_day]
+        intra = intra.loc[~intra.index.duplicated(keep='last')]
 
-
-        eligible_days = sorted(
-            day_counts[
-                day_counts >= MIN_REAL_DAY_BARS
-            ].index
-        )
-
-        if not eligible_days:
-
-            r["Reason"] = (
-                "No trading day with at least "
-                f"{MIN_REAL_DAY_BARS} intraday bars"
-            )
-
-            rejection_rows.append(r)
-
+        if len(intra) < MIN_REAL_DAY_BARS:
+            r["Reason"] = "Insufficient bars on eligible regular-hours day"
+            rejects.append(r)
             continue
 
-        latest_real_day = eligible_days[-1]
-
-        intraday_df = intraday_df[
-            intraday_df.index.date
-            == latest_real_day
-        ].copy()
-
-
-        r["Latest_Real_Day"] = str(
-            latest_real_day
-        )
-
-        if len(intraday_df) < MIN_REAL_DAY_BARS:
-
-            r["Reason"] = (
-                f"Latest real day has fewer than "
-                f"{MIN_REAL_DAY_BARS} bars"
-            )
-
-            rejection_rows.append(r)
-
-            continue
-
-        # ----------------------------------------------------
-        # INTRADAY CLOSE ARRAY
-        # ----------------------------------------------------
-
-        close_raw = (
-            pd.to_numeric(
-                intraday_df["Close"],
-                errors="coerce"
-            )
-            .dropna()
-            .values
-            .astype(float)
-        )
+        close_series_clean = pd.to_numeric(intra["Close"], errors="coerce").dropna()
+        close_raw = close_series_clean.values.astype(float)
 
         if len(close_raw) < MIN_INTRADAY_BARS:
-
-            r["Reason"] = (
-                f"Intraday bars below "
-                f"{MIN_INTRADAY_BARS}"
-            )
-
-            rejection_rows.append(r)
-
+            r["Reason"] = "Too few intraday bars"
+            rejects.append(r)
             continue
 
-        # ----------------------------------------------------
-        # CURRENT INTRADAY PRICE
-        # ----------------------------------------------------
+        price = float(close_raw[-1])
+        r["Price"] = round(price, 2)
 
-        current_price = float(
-            close_raw[-1]
-        )
-
-        r["Price"] = round(
-            current_price,
-            2
-        )
-
-        if not np.isfinite(
-            current_price
-        ):
-
-            r["Reason"] = (
-                "Current intraday price invalid"
-            )
-
-            rejection_rows.append(r)
-
+        if price < min_price or price > max_price:
+            r["Reason"] = "Price outside range"
+            rejects.append(r)
             continue
 
-        # ====================================================
-        # PRICE FILTER
-        # ====================================================
-
-        if (
-            current_price < min_price
-            or current_price > max_price
-        ):
-
-            r["Reason"] = (
-                f"Price outside range "
-                f"${min_price:.2f}–${max_price:.2f}"
-            )
-
-            rejection_rows.append(r)
-
+        vol = pd.to_numeric(daily["Volume"], errors="coerce").dropna().values.astype(float)
+        if len(vol) < 20:
+            r["Reason"] = "Insufficient volume history"
+            rejects.append(r)
             continue
 
-        # ====================================================
-        # VOLUME FILTER
-        # ====================================================
+        avg_vol = float(np.mean(vol[-20:]))
+        r["Avg_Volume_20d"] = round(avg_vol, 0)
 
-        if "Volume" not in daily_df.columns:
-
-            r["Reason"] = (
-                "Daily Volume column missing"
-            )
-
-            rejection_rows.append(r)
-
+        if avg_vol < MIN_AVG_VOLUME_20D:
+            r["Reason"] = "Low volume"
+            rejects.append(r)
             continue
 
-        vol_d = (
-            pd.to_numeric(
-                daily_df["Volume"],
-                errors="coerce"
-            )
-            .dropna()
-            .values
-            .astype(float)
-        )
+        # --- Stale (no-trade) bar check -------------------------------------
+        # Thinly-traded penny stocks often have 1-minute windows with zero
+        # trades. Yahoo doesn't drop or NaN those bars — it forward-fills
+        # OHLC with the last traded price (Volume = 0), which is why you'll
+        # sometimes see Bar4_Close == Bar5_Close. A "5-bar breakout" built
+        # mostly out of forward-filled bars is a weaker signal: the price
+        # "held" because nothing traded, not because buyers defended it.
+        # We check intraday minute-bar Volume (not the daily 20d average
+        # already checked above) on exactly the same 5 bars used for last5,
+        # via the shared index, so this lines up 1:1 with what's displayed.
+        last5_index = close_series_clean.tail(5).index
+        bar_vol_last5 = pd.to_numeric(intra["Volume"], errors="coerce").reindex(last5_index).fillna(0.0)
+        stale_bars_last5 = int((bar_vol_last5 <= 0).sum())
 
-        if len(vol_d) < 20:
-
-            r["Reason"] = (
-                "Fewer than 20 valid "
-                "daily volume observations"
-            )
-
-            rejection_rows.append(r)
-
+        if stale_bars_last5 > MAX_STALE_BARS_LAST5:
+            r["Reason"] = f"Too many no-trade bars in last 5 ({stale_bars_last5})"
+            rejects.append(r)
             continue
 
-        avg_volume_20d = float(
-            np.mean(
-                vol_d[-20:]
-            )
-        )
-
-        r["Avg_Volume_20d"] = round(
-            avg_volume_20d,
-            0
-        )
-
-        if (
-            not np.isfinite(avg_volume_20d)
-            or avg_volume_20d < MIN_AVG_VOLUME_20D
-        ):
-
-            r["Reason"] = (
-                f"20-day average volume below "
-                f"{MIN_AVG_VOLUME_20D:,}"
-            )
-
-            rejection_rows.append(r)
-
-            continue
-
-        # ====================================================
-        # EMA CALCULATIONS
-        # ====================================================
-
-        ema9_i = (
-            intraday_df["Close"]
-            .ewm(
-                span=9,
-                adjust=False
-            )
-            .mean()
-            .values
-            .astype(float)
-        )
-
-        ema20_i = (
-            intraday_df["Close"]
-            .ewm(
-                span=20,
-                adjust=False
-            )
-            .mean()
-            .values
-            .astype(float)
-        )
-
-        if len(close_raw) < 5:
-
-            r["Reason"] = (
-                "Fewer than 5 valid "
-                "intraday closes"
-            )
-
-            rejection_rows.append(r)
-
-            continue
-
-        # ----------------------------------------------------
-        # CURRENT EMA VALUES
-        # ----------------------------------------------------
-
-        ema9_now = float(
-            ema9_i[-1]
-        )
-
-        ema20_now = float(
-            ema20_i[-1]
-        )
-
-        # ----------------------------------------------------
-        # EMA SLOPES
-        # ----------------------------------------------------
-
-        ema9_slope = float(
-            ema9_i[-1]
-            - ema9_i[-5]
-        )
-
-        ema20_slope = float(
-            ema20_i[-1]
-            - ema20_i[-5]
-        )
-
-        # ====================================================
-        # LAST 5 BARS
-        # ====================================================
+        ema9_series = intra["Close"].ewm(span=9, adjust=False).mean()
+        ema20_series = intra["Close"].ewm(span=20, adjust=False).mean()
 
         last5 = close_raw[-5:]
 
-        last5_ema9 = ema9_i[-5:]
+        ema9_last5 = ema9_series.tail(5).values.astype(float)
+        ema20_last5 = ema20_series.tail(5).values.astype(float)
 
-        # ====================================================
-        # MICRO-SEGMENT STRENGTH FILTER (PENNY ONLY)
-        # ====================================================
+        Bar4_EMA9 = ema9_last5[-2]
+        Bar5_EMA9 = ema9_last5[-1]
+        Bar4_EMA20 = ema20_last5[-2]
+        Bar5_EMA20 = ema20_last5[-1]
 
-        # Last 3 closes
-        c5 = last5[-1]   # most recent bar
-        c4 = last5[-2]
-        c3 = last5[-3]
+        ema9_now = Bar5_EMA9
+        ema20_now = Bar5_EMA20
+        ema9_prev = Bar4_EMA9
+        ema20_prev = Bar4_EMA20
 
-        # Require at least +5% growth bar-to-bar
-        cond_bar5_over_bar4 = (c5 > c4 * 1.05)
-        cond_bar4_over_bar3 = (c4 > c3 * 1.05)
+        ema9_slope = ema9_now - ema9_prev
+        ema20_slope = ema20_now - ema20_prev
 
-        cond_micro_segment_strong = (
-            cond_bar5_over_bar4 and
-            cond_bar4_over_bar3
+        x = np.array([1, 2, 3, 4, 5], dtype=float)
+        reg_slope = np.polyfit(x, last5, 1)[0]
+
+        # ============================
+        # Consistency score (0 to 1)
+        # Measures how stable the 5-bar trend is
+        # ============================
+        diffs = np.diff(last5)
+        up_moves = np.sum(diffs > 0)
+        down_moves = np.sum(diffs < 0)
+
+        # Consistency = proportion of bars moving in the dominant direction
+        if up_moves >= down_moves:
+            consistency_score = up_moves / 4.0
+        else:
+            consistency_score = down_moves / 4.0
+
+        last5_above_ema9 = bool(np.all(last5 > ema9_last5))
+        pressure = (last5[-1] - ema9_now) / last5[-1]
+
+        acceleration = (
+            (reg_slope > 0) and
+            (ema9_slope > 0) and
+            last5_above_ema9
         )
 
-        # ----------------------------------------------------
-        # PRICE INCREASE
-        # ----------------------------------------------------
+        recent2_above = np.all(last5[-2:] > ema9_last5[-2:])
+        preceding3_below = np.all(last5[:3] <= ema9_last5[:3])
+        previous4_below = np.all(last5[:-1] <= ema9_last5[:-1])
 
-        price_increase_pct = (
+        dev_one = price > ema9_now and previous4_below
+        dev_two = recent2_above and preceding3_below
+        dev_cross = dev_one or dev_two
 
-            (
-                last5[-1]
-                - last5[0]
-            )
-            / last5[0]
-            * 100
-
-            if last5[0] > 0
-
-            else 0.0
-        )
-
-        p_score = price_increase_score(
-            price_increase_pct
-        )
-
-        # ====================================================
-        # EMA CONDITIONS
-        # ====================================================
-
-        cond_price_above_ema9 = (
-            current_price > ema9_now
-        )
-
-        cond_price_above_ema20 = (
-            current_price > ema20_now
-        )
-
-        cond_ema9_above_ema20 = (
-            ema9_now > ema20_now
-        )
-
-        cond_ema9_slope_pos = (
-            ema9_slope > 0
-        )
-
-        cond_ema20_slope_pos = (
+        dev_base = (
+            price > ema20_now and
+            ema9_now > ema20_now and
+            ema9_slope > 0 and
             ema20_slope > 0
         )
 
-        cond_last5_above_ema9 = bool(
-            np.all(
-                last5 > last5_ema9
-            )
+        dev_signal = dev_base and dev_cross and acceleration
+
+        # ============================
+        # Strength thresholds
+        # FIX: slopes and regression slope are now expressed as a fraction
+        # of price (like `pressure` already was) instead of raw dollar
+        # amounts. Raw-dollar thresholds made the filter far stricter for
+        # low-priced names and far looser for higher-priced names within
+        # the same $1-$10 scan range, which isn't apples-to-apples for a
+        # penny-stock screener.
+        # ============================
+        MIN_EMA9_SLOPE_PCT = 0.0015       # 0.15% of price per bar
+        MIN_EMA20_SLOPE_PCT = 0.0008      # 0.08% of price per bar
+        MIN_REGRESSION_SLOPE_PCT = 0.0012 # 0.12% of price per bar
+        MIN_PRESSURE = 0.003
+        MIN_CONSISTENCY = 0.60
+
+        ema9_slope_pct = ema9_slope / price if price else 0
+        ema20_slope_pct = ema20_slope / price if price else 0
+        reg_slope_pct = reg_slope / price if price else 0
+
+        # ============================
+        # EMA (strong alignment)
+        # ============================
+        cond_align = (
+            price > ema9_now and
+            price > ema20_now and
+            ema9_now > ema20_now and
+            ema9_slope_pct > MIN_EMA9_SLOPE_PCT and
+            ema20_slope_pct > MIN_EMA20_SLOPE_PCT and
+            reg_slope_pct > MIN_REGRESSION_SLOPE_PCT and
+            pressure > MIN_PRESSURE and
+            consistency_score >= MIN_CONSISTENCY
         )
 
-        # Reject if micro-segment is weak
-        if not cond_micro_segment_strong:
-            r["Reason"] = (
-                "Weak micro-segment: last 3 bars do not show +5% acceleration"
-            )
-            rejection_rows.append(r)
+        # ============================
+        # Classification (EMA only)
+        # ============================
+        if not cond_align:
+            r["Reason"] = "Failed EMA criteria"
+            rejects.append(r)
             continue
 
-        # ====================================================
-        # DEVELOPMENT SIGNAL — DIAGNOSTIC ONLY
-        # ====================================================
-        # DEVELOPMENT v4 — flexible early-transition hypothesis.
-        #
-        # Allow either of these recent patterns:
-        #   A) only the current (5th) bar is above EMA9, while the
-        #      preceding 4 bars are at/below EMA9; OR
-        #   B) the 4th and 5th bars are above EMA9, while the
-        #      preceding 3 bars are at/below EMA9.
-        #
-        # This captures an early transition that has already held
-        # above EMA9 for two consecutive bars without requiring
-        # a single-bar crossover pattern.
-        #
-        # This is DIAGNOSTIC ONLY and does not replace Strong.
+        status = "EMA"
+        pct = (last5[-1] - last5[0]) / last5[0] * 100 if last5[0] > 0 else 0
 
-        # DEVELOPMENT v4 — flexible early-transition hypothesis.
-        #
-        # Allow either of these recent patterns:
-        #   A) only the current (5th) bar is above EMA9, while the
-        #      preceding 4 bars are at/below EMA9; OR
-        #   B) the 4th and 5th bars are above EMA9, while the
-        #      preceding 3 bars are at/below EMA9.
-        #
-        # This captures an early transition that has already held
-        # above EMA9 for two consecutive bars without requiring a
-        # single-bar crossover pattern.
-        recent2_above_ema9 = bool(
-            np.all(last5[-2:] > last5_ema9[-2:])
-        )
-
-        preceding3_below_ema9 = bool(
-            np.all(last5[:3] <= last5_ema9[:3])
-        )
-
-        previous4_below_ema9 = bool(
-            np.all(last5[:-1] <= last5_ema9[:-1])
-        )
-
-        development_one_bar_transition = bool(
-            current_price > ema9_now
-            and previous4_below_ema9
-        )
-
-        development_two_bar_transition = bool(
-            recent2_above_ema9
-            and preceding3_below_ema9
-        )
-
-        development_recent_ema9_cross = bool(
-            development_one_bar_transition
-            or development_two_bar_transition
-        )
-
-        development_base_conditions = (
-            cond_price_above_ema20
-            and cond_ema9_above_ema20
-            and cond_ema9_slope_pos
-            and cond_ema20_slope_pos
-        )
-
-
-        development_signal = bool(
-            development_base_conditions
-            and development_recent_ema9_cross
-        )
-
-        # ====================================================
-        # DEVELOPMENT MICRO-SEGMENT ACCELERATION FILTER
-        # ====================================================
-
-        c5 = last5[-1]
-        c4 = last5[-2]
-        c3 = last5[-3]
-
-        dev_bar5_over_bar4 = (c5 > c4 * 1.05)
-        dev_bar4_over_bar3 = (c4 > c3 * 1.05)
-
-        cond_development_acceleration = (
-            dev_bar5_over_bar4 and dev_bar4_over_bar3
-        )
-
-        if development_signal and not cond_development_acceleration:
-            r["Reason"] = (
-                "Weak early development: last 3 bars do not show +5% acceleration"
-            )
-            rejection_rows.append(r)
-            continue
-
-        if development_two_bar_transition:
-            development_transition_type = "2-Bar Transition"
-        elif development_one_bar_transition:
-            development_transition_type = "1-Bar Transition"
-        else:
-            development_transition_type = "None"
-
-        development_reasons = []
-
-        if current_price <= ema9_now:
-            development_reasons.append(
-                "current price <= EMA9"
-            )
-
-        if not development_recent_ema9_cross:
-            development_reasons.append(
-                "recent EMA9 transition pattern not met: "
-                "requires either current bar above EMA9 with previous 4 at/below, "
-                "or bars 4-5 above EMA9 with bars 1-3 at/below"
-            )
-
-        if not cond_price_above_ema20:
-            development_reasons.append("price <= EMA20")
-
-        if not cond_ema9_above_ema20:
-            development_reasons.append("EMA9 <= EMA20")
-
-        if not cond_ema9_slope_pos:
-            development_reasons.append("EMA9 slope not positive")
-
-        if not cond_ema20_slope_pos:
-            development_reasons.append("EMA20 slope not positive")
-
-        if development_signal:
-            if development_two_bar_transition:
-                development_reason = (
-                    "Bars 4-5 above EMA9 after bars 1-3 at/below EMA9, "
-                    "with positive EMA9/EMA20 structure"
-                )
-            else:
-                development_reason = (
-                    "Current bar above EMA9 after previous 4 bars "
-                    "at/below EMA9, with positive EMA9/EMA20 structure"
-                )
-        else:
-            development_reason = "; ".join(
-                development_reasons
-            )
-
-# EMA ALIGNMENT SCORE
-        # ====================================================
-
-        if str(ticker).upper() == "TEM":
-            print("\n" + "=" * 80)
-            print("TEM EMA DIAGNOSTIC")
-            print("=" * 80)
-            print("Latest intraday timestamp:", intraday_df.index[-1])
-            print("Current price:", current_price)
-            print("EMA9:", ema9_now)
-            print("EMA20:", ema20_now)
-            print("EMA9 slope:", ema9_slope)
-            print("EMA20 slope:", ema20_slope)
-            print("Last 5 closes:", last5)
-            print("Last 5 EMA9:", last5_ema9)
-            print("Price > EMA9:", cond_price_above_ema9)
-            print("Price > EMA20:", cond_price_above_ema20)
-            print("EMA9 > EMA20:", cond_ema9_above_ema20)
-            print("EMA9 slope positive:", cond_ema9_slope_pos)
-            print("EMA20 slope positive:", cond_ema20_slope_pos)
-            print("All last 5 closes > EMA9:", cond_last5_above_ema9)
-            print("=" * 80)
-
-        ema_score = 0
-
-        if cond_price_above_ema9:
-            ema_score += 2
-
-        if cond_price_above_ema20:
-            ema_score += 2
-
-        if cond_ema9_above_ema20:
-            ema_score += 2
-
-        if cond_ema9_slope_pos:
-            ema_score += 1
-
-        if cond_ema20_slope_pos:
-            ema_score += 1
-
-        # ====================================================
-        # STORE DIAGNOSTIC CONDITIONS
-        # ====================================================
-
-        r.update({
-
-            "EMA_Score":
-                ema_score,
-
-            "Price_Increase_%_5Bars":
-                round(
-                    price_increase_pct,
-                    3
-                ),
-
-            "Price_Increase_Score":
-                p_score,
-
-            "Price_Above_EMA9":
-                (
-                    "PASS"
-                    if cond_price_above_ema9
-                    else "FAIL"
-                ),
-
-            "Price_Above_EMA20":
-                (
-                    "PASS"
-                    if cond_price_above_ema20
-                    else "FAIL"
-                ),
-
-            "EMA9_Above_EMA20":
-                (
-                    "PASS"
-                    if cond_ema9_above_ema20
-                    else "FAIL"
-                ),
-
-            "EMA9_Slope_Pos":
-                (
-                    "PASS"
-                    if cond_ema9_slope_pos
-                    else "FAIL"
-                ),
-
-            "EMA20_Slope_Pos":
-                (
-                    "PASS"
-                    if cond_ema20_slope_pos
-                    else "FAIL"
-                ),
-
-            "Last5_Above_EMA9":
-                (
-                    "PASS"
-                    if cond_last5_above_ema9
-                    else "FAIL"
-                ),
-
-            #"LastBar_Higher_3":
-            #    (
-            #        "PASS"
-            #        if cond_lastbar_higher_3
-            #        else "FAIL"
-            #    ),
-
-            #"LastBar_Higher_4":
-            #    (
-            #        "PASS"
-            #        if cond_lastbar_higher_4
-            #        else "FAIL"
-            #    ),
-
-            "Development_Signal":
-                (
-                    "DEVELOPMENT"
-                    if development_signal
-                    else "NO"
-                ),
-
-            "Development_Reason":
-                development_reason,
-
-            "Development_Current_Above_EMA9":
-                (
-                    "PASS"
-                    if current_price > ema9_now
-                    else "FAIL"
-                ),
-
-            "Development_Previous4_Below_EMA9":
-                (
-                    "PASS"
-                    if previous4_below_ema9
-                    else "FAIL"
-                ),
-
-            "Development_Recent2_Above_EMA9":
-                (
-                    "PASS"
-                    if recent2_above_ema9
-                    else "FAIL"
-                ),
-
-            "Development_Preceding3_Below_EMA9":
-                (
-                    "PASS"
-                    if preceding3_below_ema9
-                    else "FAIL"
-                ),
-
-            "Development_Transition_Type":
-                development_transition_type
-        })
-
-        # ====================================================
-        # DETERMINE FAILED HARD CONDITIONS
-        # ====================================================
-
-        failed = []
-
-        if ema_score < 4:
-
-            failed.append(
-                "EMA score < 4/8"
-            )
-
-        if not cond_last5_above_ema9:
-
-            failed.append(
-                "not all last 5 closes > EMA9"
-            )
-
-        # ====================================================
-        # REJECTED
-        # ====================================================
-
-        if failed:
-
-            r["Reason"] = "; ".join(
-                failed
-            )
-
-            rejection_rows.append(r)
-
-            continue
-
-        # ====================================================
-        # QUALIFIED
-        # ====================================================
-
-        close_daily = (
-            pd.to_numeric(
-                daily_df["Close"],
-                errors="coerce"
-            )
-            .dropna()
-        )
-
-        if len(close_daily) >= 2:
-
-            previous_close = float(
-                close_daily.iloc[-2]
-            )
-
-        else:
-
-            previous_close = current_price
-
-
-        if previous_close > 0:
-
-            gap_vs_prev_close = (
-                (
-                    current_price
-                    - previous_close
-                )
-                / previous_close
-                * 100
-            )
-
-        else:
-
-            gap_vs_prev_close = 0.0
-
-        opportunity_cat = opportunity_category(
-            gap_vs_prev_close
-        )
-
-        session_cat = session_phase(
-            intraday_df.index[-1]
-        )
-
-        r["Opportunity_Category"] = opportunity_cat
-        r["Session_Phase"] = session_cat
+        bar_vol_values = bar_vol_last5.values.astype(float)
 
         rows.append({
-
-            "Ticker":
-                ticker,
-
-            "Opportunity_Category":
-                opportunity_cat,
-
-            "Session_Phase":
-                session_cat,
-
-            "Close":
-                round(
-                    current_price,
-                    2
-                ),
-
-            "EMA_Alignment_Score":
-                ema_score,
-
-            "Price_Increase_%_5Bars":
-                round(
-                    price_increase_pct,
-                    3
-                ),
-
-            "Price_Increase_Score":
-                p_score,
-
-            "Price_Increase_Label":
-                price_increase_label(
-                    p_score
-                ),
-
-            "EMA9":
-                round(
-                    ema9_now,
-                    4
-                ),
-
-            "EMA20":
-                round(
-                    ema20_now,
-                    4
-                ),
-
-            "EMA9_Above_EMA20":
-                cond_ema9_above_ema20,
-
-            "EMA9_Slope":
-                round(
-                    ema9_slope,
-                    4
-                ),
-
-            "EMA20_Slope":
-                round(
-                    ema20_slope,
-                    4
-                ),
-
-            "Development_Signal":
-                (
-                    "DEVELOPMENT"
-                    if development_signal
-                    else "NO"
-                ),
-
-            "Development_Reason":
-                development_reason,
-
-            "Development_Current_Above_EMA9":
-                (
-                    "PASS"
-                    if current_price > ema9_now
-                    else "FAIL"
-                ),
-
-            "Development_Previous4_Below_EMA9":
-                (
-                    "PASS"
-                    if previous4_below_ema9
-                    else "FAIL"
-                ),
-
-            "Development_Recent2_Above_EMA9":
-                (
-                    "PASS"
-                    if recent2_above_ema9
-                    else "FAIL"
-                ),
-
-            "Development_Preceding3_Below_EMA9":
-                (
-                    "PASS"
-                    if preceding3_below_ema9
-                    else "FAIL"
-                ),
-
-            "Development_Transition_Type":
-                development_transition_type,
-
-            "Avg_Volume_20d":
-                round(
-                    avg_volume_20d,
-                    0
-                ),
-
-            "Previous_Close":
-                round(
-                    previous_close,
-                    2
-                ),
-
-            "Gap_vs_Prev_Close_%":
-                round(
-                    gap_vs_prev_close,
-                    3
-                ),
-
-            "Data_As_Of":
-                intraday_df.index[-1].strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
-
-            "_Latest_Real_Day":
-                str(
-                    latest_real_day
-                )
+            "Ticker": ticker,
+            "Close": round(price, 2),
+            "Bar1_Close": round(last5[0], 4),
+            "Bar2_Close": round(last5[1], 4),
+            "Bar3_Close": round(last5[2], 4),
+            "Bar4_Close": round(last5[3], 4),
+            "Bar5_Close": round(last5[4], 4),
+            # Per-bar (1-minute) traded volume — NOT the 20-day daily
+            # average. This is the actual shares that traded in each of
+            # the last 5 individual minute bars, so you can see the
+            # difference between e.g. a ~50-share print that barely moves
+            # price vs. a ~1,000+ share print that does. Distinct from
+            # Stale_Bars_Last5 (which only asks "was it > 0"), this shows
+            # magnitude, not just presence/absence of trading.
+            "Bar1_Volume": int(bar_vol_values[0]),
+            "Bar2_Volume": int(bar_vol_values[1]),
+            "Bar3_Volume": int(bar_vol_values[2]),
+            "Bar4_Volume": int(bar_vol_values[3]),
+            "Bar5_Volume": int(bar_vol_values[4]),
+            "Bar4_EMA9": round(Bar4_EMA9, 4),
+            "Bar4_EMA20": round(Bar4_EMA20, 4),
+            "Bar5_EMA9": round(Bar5_EMA9, 4),
+            "Bar5_EMA20": round(Bar5_EMA20, 4),
+            "Price_Increase_%_5Bars": round(pct, 3),
+            "Development_Signal": bool(dev_signal),
+            "Status": status,
+            # Which session these bars actually came from. yfinance's
+            # period="1d" returns the most recently COMPLETED session, not
+            # strictly "today" — e.g. on a Sunday it silently hands back
+            # Friday's bars. This column makes that visible in the
+            # dataframe instead of it being an invisible assumption.
+            "Latest_Real_Day": str(latest_day),
+            # Count of bars among the last 5 with zero intraday volume —
+            # i.e. no actual trade happened, Yahoo forward-filled the price
+            # from the prior bar. High values mean the "5-bar move" is
+            # partly/mostly not real trading activity.
+            "Stale_Bars_Last5": stale_bars_last5,
         })
+        # NOTE: loop continues to the next ticker here — this is the critical
+        # fix. Previously the final-assembly/return block below was indented
+        # one level too deep (inside this `for` loop), so the function
+        # returned after the FIRST ticker that passed the EMA filter and
+        # every ticker after it in the universe was never evaluated.
 
-        # Also put qualified ticker in diagnostics
-        r["Status"] = "QUALIFIED"
-
-        r["Reason"] = (
-            "v6 hard EMA conditions passed: EMA score >= 4/8 "
-            "and all last 5 closes > EMA9"
-        )
-
-        rejection_rows.append(r)
-
-    # ========================================================
-    # RANKING DATAFRAME
-    # ========================================================
-
-    ranking = pd.DataFrame(
-        rows
-    )
+    # ============================
+    # Final assembly and return
+    # FIX: moved OUTSIDE the `for ticker in active:` loop so the full
+    # universe is scanned before returning.
+    # ============================
+    ranking = pd.DataFrame(rows)
+    rejects_df = pd.DataFrame(rejects)
 
     if not ranking.empty:
-
         ranking = ranking.sort_values(
+            ["Price_Increase_%_5Bars", "Bar5_Close", "Ticker"],
+            ascending=[False, False, True]
+        ).reset_index(drop=True)
 
-            [
-                "EMA_Alignment_Score",
-                "Price_Increase_Score",
-                "Price_Increase_%_5Bars"
-            ],
+    return ranking, rejects_df
 
-            ascending=[
-                False,
-                False,
-                False
-            ]
+# ==============================================================================
+# PAGE EXECUTION
+# ==============================================================================
+# ==============================================================================
+# MARKET-DAY / DATA-FRESHNESS CHECK
+# ==============================================================================
+# yfinance's period="1d" intraday request returns the most recently
+# COMPLETED session's bars, not "today's bars or nothing." Outside market
+# hours (weekends, holidays, pre-open) that means every ticker that scores
+# is being scored on a STALE session (e.g. last Friday), which looks
+# identical in the table to a live signal unless you check the date. This
+# banner makes the distinction explicit so results are never mistaken for
+# live intraday signals when the market isn't actually open.
+_eastern = ZoneInfo("America/New_York")
+_now_et = datetime.now(_eastern)
+_is_weekday = _now_et.weekday() < 5  # Mon=0 ... Sun=6
+_minutes_now = _now_et.hour * 60 + _now_et.minute
+_is_market_hours = _is_weekday and (570 <= _minutes_now < 960)  # 09:30-16:00 ET
 
-        ).reset_index(
-            drop=True
-        )
-
-    # ========================================================
-    # REJECTION DATAFRAME
-    # ========================================================
-
-    rejections = pd.DataFrame(
-        rejection_rows
+if _is_market_hours:
+    st.success(f"🟢 Market is open — {_now_et.strftime('%A %Y-%m-%d %H:%M %Z')}. Results below reflect live/current-session bars.")
+else:
+    st.warning(
+        f"🟠 Market is CLOSED right now — {_now_et.strftime('%A %Y-%m-%d %H:%M %Z')}. "
+        "Any tickers that qualify below were scored on the most recent completed "
+        "session (check the Latest_Real_Day column), not live data. Treat this as a "
+        "historical/backtest-style run, not a trading signal."
     )
 
-    if not rejections.empty:
+tickers = _load_universe()
 
-        rejections = rejections.sort_values(
+movers = _load_movers()
+if movers:
+    st.caption(f"🔥 Movers list loaded: {len(movers)} ticker(s) — {', '.join(movers)}")
+else:
+    st.caption("No movers list loaded (optional). Add `data/movers_list.py` with a `load_movers()` function to enable mover tagging.")
 
-            [
-                "Status",
-                "Ticker"
-            ],
+st.write("### 🔍 Price Boundaries Filter")
+min_price = st.number_input("Minimum Price ($)", min_value=0.0, value=1.00, step=0.25)
+max_price = st.number_input("Maximum Price ($)", min_value=0.0, value=10.00, step=0.25)
 
-            ascending=[
-                True,
-                True
-            ]
-
-        ).reset_index(
-            drop=True
-        )
-
-    return (
-        ranking,
-        rejections
-    )
-
-# ============================================================
-# USER FILTERS
-# ============================================================
-
-st.markdown(
-    "### 🔍 Price Boundaries Filter"
+max_stale_bars_last5 = st.slider(
+    "Max no-trade bars allowed in last 5",
+    min_value=0, max_value=5, value=2,
+    help=(
+        "Thinly-traded penny stocks can have 1-minute bars with zero volume, "
+        "where Yahoo just repeats the last traded price (you'll see "
+        "Bar4_Close == Bar5_Close). Tickers with more no-trade bars than this "
+        "in their last 5 are rejected — 'Too many no-trade bars in last 5' in "
+        "the diagnostics. 0 = require every one of the last 5 bars to have a "
+        "real trade; 5 = disable this check entirely."
+    ),
 )
 
-min_price = st.number_input(
+import time
 
-    "Minimum Price ($)",
-
-    value=1.0,
-
-    min_value=1.0,
-
-    max_value=10.0,
-
-    key="ema_alignment_min_price"
-)
-
-max_price = st.number_input(
-
-    "Maximum Price ($)",
-
-    value=10.0,
-
-    min_value=1.0,
-
-    max_value=10.0,
-
-    key="ema_alignment_max_price"
-)
-
-# ============================================================
-# PRICE SCORE INFORMATION
-# ============================================================
-
-#st.markdown(
-#    "### 🎯 Price Increase Reference"
-#)
-
-#st.caption(
-
-#    "Price Increase Score is informational/ranking only. "
-
-#    "0 = <0.25%, "
-
-#    "1 = 0.25–<0.50%, "
-
-#    "2 = 0.50–<1.00%, "
-
-#    "3 = ≥1.00% "
-
-#    "over the last 5 one-minute bars."
-#)
-
-# ============================================================
+# ==============================================================================
 # RUN BUTTON
-# ============================================================
-
-run_model = st.button(
-
-    "Run EMA Alignment Model Scan",
-
-    key="ema_alignment_run_button"
-)
-
-# ============================================================
-# RUN MODEL
-# ============================================================
-
-if run_model:
-
-    try:
-
-        st.cache_data.clear()
-
-        start_time = time.time()
-
-        eastern = ZoneInfo("America/New_York")
-
-        now_est = datetime.now(eastern)
-
-        # ----------------------------------------------------
-        # WEEKEND PROTECTION
-        # ----------------------------------------------------
-
-        if now_est.weekday() >= 5:
-
-            st.warning(
-                "⚠️ U.S. stock market is closed today."
-            )
-
-            st.info(
-
-                "The model requires current-day "
-                "1-minute data for a live scan. "
-
-                "No current-day scan was performed."
-            )
-
-            st.session_state[
-                "ema_alignment_raw_ranking"
-            ] = pd.DataFrame()
-
-            st.session_state[
-                "ema_alignment_rejections"
-            ] = pd.DataFrame()
-
-            st.stop()
-
-        # ----------------------------------------------------
-        # EXECUTION TIME
-        # ----------------------------------------------------
-
-        st.write(
-
-            "⏱️ Scan Execution Time: **"
-            + now_est.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-            + " EST**"
-        )
-
-        # ----------------------------------------------------
-        # LOAD UNIVERSE
-        # ----------------------------------------------------
-
-        universe_list = _load_universe()
-
-        if not universe_list:
-
-            st.error(
-                "The stock universe could not "
-                "be loaded. "
-                "Check data/us_universe_list.py "
-                "and utils/data_fetch.py."
-            )
-
-            st.stop()
-
-        # ----------------------------------------------------
-        # TEMPORARY UNIVERSE TRACE
-        # ----------------------------------------------------
-
-        #st.write("### 🔎 UNIVERSE TRACE")
-
-        #st.write(
-        #    f"Page 5 executing file: `{__file__}`"
-        #)
-
-        #st.write(
-        #    f"Universe variable type: `{type(universe_list)}`"
-        #)
-
-        #st.write(
-        #    f"Universe variable length: "
-        #    f"**{len(universe_list):,}**"
-        #)
-
-        #st.write(
-        #    f"First 10 tickers: `{universe_list[:10]}`"
-        #)
-
-        #st.write(
-        #    f"Last 10 tickers: `{universe_list[-10:]}`"
-        #)
-
-        # ----------------------------------------------------
-        # MASTER UNIVERSE COUNT
-        # ----------------------------------------------------
-
-        st.write(
-            f"Master Universe loaded: "
-            f"**{len(universe_list):,} tickers**"
-        )
-
-        # ----------------------------------------------------
-        # DOWNLOAD DATA
-        # ----------------------------------------------------
-
-        progress = st.progress(
-
-            0,
-
-            text=(
-                "Downloading daily and "
-                "1-minute market data..."
-            )
-        )
-
-        raw_daily, raw_intra = (
-            fetch_clean_market_batch(
-                tuple(universe_list)
-            )
-        )
-
-        if (
-            raw_daily is None
-            or raw_daily.empty
-            or raw_intra is None
-            or raw_intra.empty
-        ):
-
-            progress.empty()
-
-            st.warning(
-                "No market data was returned."
-            )
-
-            st.stop()
-
-        # ----------------------------------------------------
-        # RUN ENGINE
-        # ----------------------------------------------------
-
-        progress.progress(
-
-            0.6,
-
-            text=(
-                "Calculating EMA alignment, "
-                "price scores, and rejection "
-                "diagnostics..."
-            )
-        )
-
-        ranking, rejections = (
-            ema_alignment_engine(
-
-                universe_list,
-
-                raw_daily,
-
-                raw_intra,
-
-                min_price,
-
-                max_price
-            )
-        )
-
-        progress.progress(
-
-            0.9,
-
-            text=(
-                "Preparing ranked results..."
-            )
-        )
-
-        progress.empty()
-
-        # ----------------------------------------------------
-        # SAVE RESULTS
-        # ----------------------------------------------------
-
-        st.session_state[
-            "ema_alignment_raw_ranking"
-        ] = ranking
-
-        st.session_state[
-            "ema_alignment_rejections"
-        ] = rejections
-
-        # ----------------------------------------------------
-        # RUNTIME
-        # ----------------------------------------------------
-
-        st.write(
-
-            f"⚡ Total Model Runtime: "
-            f"**{time.time() - start_time:.2f} seconds**"
-        )
-
-    except Exception as e:
-
-        st.error(
-            f"Model execution failed: {e}"
-        )
-
-        st.exception(e)
-
-# ============================================================
-# GET RESULTS FROM SESSION STATE
-# ============================================================
-
-ranking = st.session_state.get(
-
-    "ema_alignment_raw_ranking",
-
-    pd.DataFrame()
-)
-
-rejections = st.session_state.get(
-
-    "ema_alignment_rejections",
-
-    pd.DataFrame()
-)
-
-# ============================================================
-# V6 NOTE — STRONG SIGNAL SIMPLIFIED
-# ============================================================
-
-st.caption(
-    "V6 Strong logic: the latest bar does not need to be higher "
-    "than bars -3 or -4. Those comparisons remain diagnostic "
-    "information only. The 5-bar price increase % and score "
-    "indicate recent price strength."
-)
-
-# ============================================================
-# DEVELOPMENT SIGNALS — DIAGNOSTIC ONLY
-# ============================================================
-
-st.markdown(
-    "### 🟡 Development Signals — Diagnostic Only"
-)
-
-st.caption(
-    "Development v4 is an earlier transition hypothesis. "
-    "It does NOT replace the existing Strong/qualified logic. "
-    "It allows either: (A) only the current 5th bar above EMA9 "
-    "with the previous 4 at/below EMA9, or (B) the 4th and 5th "
-    "bars above EMA9 with the first 3 at/below EMA9. "
-    "Price must also be above EMA20, EMA9 above EMA20, and both "
-    "EMA9/EMA20 slopes positive. No strictly rising 5-bar sequence "
-    "is required."
-)
-
-development_df = pd.DataFrame()
-
-if (
-    rejections is not None
-    and not rejections.empty
-    and "Development_Signal" in rejections.columns
-):
-    development_df = rejections[
-        rejections["Development_Signal"] == "DEVELOPMENT"
-    ].copy()
-
-if (
-    ranking is not None
-    and not ranking.empty
-    and "Development_Signal" in ranking.columns
-):
-    ranking_development = ranking[
-        ranking["Development_Signal"] == "DEVELOPMENT"
-    ].copy()
-
-    if not ranking_development.empty:
-        development_df = pd.concat(
-            [development_df, ranking_development],
-            ignore_index=True
-        )
-
-if not development_df.empty:
-
-    development_df = development_df.drop_duplicates(
-        subset=["Ticker"]
+# ==============================================================================
+# The full pipeline (daily fetch + pre-filter + threaded intraday fetch +
+# engine) is expensive — tens of seconds even with caching helping on
+# reruns within the same 2-minute TTL window. Without a run button,
+# Streamlit re-executes this whole script top-to-bottom on EVERY widget
+# interaction anywhere on the page — including unrelated ones, like
+# picking a ticker in the rejection-diagnostics selectbox further down —
+# which means the entire fetch pipeline would silently refire just from
+# clicking around the page, not just when you actually want a fresh scan.
+# Gating it behind a button, and caching the results in session_state, so
+# the model only runs when you explicitly ask it to, and other widget
+# interactions on the page just redraw from the last run's stored results.
+run_clicked = st.button("🚀 Run Model", type="primary")
+
+if run_clicked:
+    t0 = time.time()
+    daily_batch = fetch_daily_batch(tuple(tickers))
+    t1 = time.time()
+
+    candidates, prefilter_rejects = daily_prefilter(tickers, daily_batch, min_price, max_price)
+    t2 = time.time()
+
+    intra_batch = fetch_intraday_batch(tuple(candidates))
+    t3 = time.time()
+
+    ranking, engine_rejects = ema_alignment_engine(
+        candidates, daily_batch, intra_batch, min_price, max_price,
+        max_stale_bars_last5=max_stale_bars_last5,
     )
+    t4 = time.time()
 
-    development_display_cols = [
-        "Ticker",
-        "Development_Signal",
-        "Price",
-        "EMA_Score",
-        "Price_Increase_%_5Bars",
-        "Price_Increase_Score",
-        "Development_Current_Above_EMA9",
-        "Development_Previous4_Below_EMA9",
-        "Development_Recent2_Above_EMA9",
-        "Development_Preceding3_Below_EMA9",
-        "Development_Transition_Type",
-        "Last5_Rising_Trend",
-        "Price_Above_EMA20",
-        "EMA9_Above_EMA20",
-        "EMA9_Slope_Pos",
-        "EMA20_Slope_Pos",
-        "Development_Reason"
-    ]
+    rejects = pd.concat([pd.DataFrame(prefilter_rejects), engine_rejects], ignore_index=True)
 
-    development_display_cols = [
-        c for c in development_display_cols
-        if c in development_df.columns
-    ]
+    # Persist everything the display sections below need, so they can
+    # render from session_state on reruns triggered by OTHER widgets
+    # (e.g. the rejection-ticker selectbox) without re-fetching anything.
+    st.session_state["model_results"] = {
+        "ranking": ranking,
+        "rejects": rejects,
+        "tickers": tickers,
+        "n_candidates": len(candidates),
+        "n_universe": len(tickers),
+        "timings": (t0, t1, t2, t3, t4),
+        "run_at_et": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S %Z"),
+    }
 
-    st.dataframe(
-        development_df[development_display_cols],
-        hide_index=True,
-        use_container_width=True
-    )
+results = st.session_state.get("model_results")
 
-    st.info(
-        "🟡 DEVELOPMENT is an observation signal only. "
-        "The purpose is to measure whether the earlier EMA9 "
-        "transition produces better entry opportunities than "
-        "waiting for the existing Strong confirmation."
-    )
-
+if results is None:
+    st.info("Click **🚀 Run Model** above to fetch data and run the scan.")
+    ranking = pd.DataFrame()
+    rejects = pd.DataFrame()
 else:
-    st.write("No Development candidates detected in this scan.")
-
-# ============================================================
-# OPPORTUNITY CATEGORY SUMMARY
-# ============================================================
-
-if (
-    ranking is not None
-    and not ranking.empty
-    and "Opportunity_Category" in ranking.columns
-):
-    st.markdown("### 🧭 Opportunity Category Summary")
-
-    category_summary = (
-        ranking["Opportunity_Category"]
-        .value_counts()
-        .rename_axis("Opportunity_Category")
-        .reset_index(name="Qualified_Tickers")
-    )
-
-    st.dataframe(
-        category_summary,
-        hide_index=True,
-        use_container_width=True
-    )
-
-    st.caption(
-        "This is a summary of categories among the currently qualified EMA tickers. "
-        "It is informational only and does not filter or change qualification."
-    )
-
-
-# ============================================================
-# QUALIFIED RESULTS
-# ============================================================
-
-if (
-    ranking is not None
-    and not ranking.empty
-):
-
-    display_df = ranking.drop(
-
-        columns=[
-            "_Latest_Real_Day"
-        ],
-
-        errors="ignore"
-
-    ).copy()
-
-
-    st.subheader(
-
-        f"📊 EMA Alignment Results — "
-        f"{len(display_df)} Tickers"
-    )
-
-    st.dataframe(
-
-        display_df.style.apply(
-            color_score_columns,
-            axis=None
-        ),
-
-        hide_index=True,
-
-        use_container_width=True
-    )
-
-    # --------------------------------------------------------
-    # PRICE SCORE EXPLANATION
-    # --------------------------------------------------------
-
-    st.markdown(
-        "### 🧭 How to read Price Increase Score"
-    )
-
+    ranking = results["ranking"]
+    rejects = results["rejects"]
+    run_universe = results["tickers"]
+    t0, t1, t2, t3, t4 = results["timings"]
+    st.caption(f"Last run: {results['run_at_et']}")
     st.write(
-
-        "The EMA Alignment Score identifies "
-        "the structural setup. "
-
-        "The Price Increase Score tells you "
-        "whether the stock is actually moving "
-        "enough over the last 5 one-minute bars. "
-
-        "It is **NOT a rejection filter**."
+        f"### ⏱️ Runtime: {t4 - t0:.2f}s total "
+        f"(daily fetch {t1 - t0:.2f}s · pre-filter {t2 - t1:.2f}s · "
+        f"intraday fetch {t3 - t2:.2f}s [{results['n_candidates']}/{results['n_universe']} tickers] · "
+        f"engine {t4 - t3:.2f}s)"
     )
 
-    st.markdown(
-        "### 🧭 Opportunity Category"
-    )
+    # Tag every ranking/rejects row with whether it's on the curated
+    # movers list, recomputed fresh from the CURRENT movers list on every
+    # script rerun (not frozen at click time) — so editing
+    # data/movers_list.py between runs updates tags immediately without
+    # needing to click Run Model again.
+    movers_set = set(movers)
+    if not ranking.empty:
+        ranking = ranking.copy()
+        ranking["Watchlist"] = ranking["Ticker"].apply(lambda t: "Movers List" if t in movers_set else "Not Movers List")
+    if not rejects.empty:
+        rejects = rejects.copy()
+        rejects["Watchlist"] = rejects["Ticker"].apply(lambda t: "Movers List" if t in movers_set else "Not Movers List")
 
-    st.caption(
-        "Opportunity Category is informational only. It does NOT "
-        "change the EMA qualification rules. Deep Recovery = current "
-        "price is at least 5% below the previous trading day's close; "
-        "Moderate Recovery = more than 2% and less than 5% below; "
-        "Near Previous Close = within ±2%; Continuation = more than 2% "
-        "and up to 5% above; Extended = more than 5% above. Session "
-        "Phase identifies whether the signal occurs during the first "
-        "40 minutes or later."
-    )
+    # ==========================================================================
+    # MOVERS SCORECARD — the direct answer to "what happened to each of my
+    # known movers this run?" One row per curated ticker: qualified (with
+    # its numbers), rejected (with the exact reason — this is what would
+    # have told you immediately why GRML-style misses happen), or not even
+    # in the scanned universe at all (catches foreign-listing / wrong-
+    # exchange gaps like GRML directly, instead of discovering it after
+    # the fact from an outside chart).
+    # ==========================================================================
+    if movers:
+        st.write("### 🔥 Movers List Scorecard")
+        scorecard_rows = []
+        for m in movers:
+            if m not in run_universe:
+                scorecard_rows.append({"Ticker": m, "Status": "⚠️ Not in scanned universe (foreign listing, wrong exchange, or delisted — check the ticker)"})
+                continue
+            if not ranking.empty and m in ranking["Ticker"].values:
+                row = ranking[ranking["Ticker"] == m].iloc[0]
+                scorecard_rows.append({
+                    "Ticker": m,
+                    "Status": f"✅ Qualified — Close ${row['Close']}, {row['Price_Increase_%_5Bars']}% (5 bars), Stale bars: {row.get('Stale_Bars_Last5', 'N/A')}",
+                })
+                continue
+            if not rejects.empty and m in rejects["Ticker"].values:
+                reasons = rejects[rejects["Ticker"] == m]["Reason"].dropna().unique().tolist()
+                scorecard_rows.append({"Ticker": m, "Status": f"❌ Rejected — {'; '.join(reasons) if reasons else 'reason not recorded'}"})
+                continue
+            scorecard_rows.append({"Ticker": m, "Status": "❔ Not evaluated (in universe but no result recorded this run)"})
+        st.dataframe(pd.DataFrame(scorecard_rows), use_container_width=True, hide_index=True)
 
+# ==============================================================================
+# DISPLAY RESULTS (EMA ONLY)
+# ==============================================================================
+if results is not None:
+    if ranking.empty:
+        st.warning("No tickers qualified for EMA alignment.")
+    else:
+        st.write("### 📊 EMA Alignment (Strong)")
+        ema_only = ranking[ranking["Status"] == "EMA"]
+        if ema_only.empty:
+            st.info("No EMA Alignment tickers.")
+        else:
+            st.dataframe(ema_only, use_container_width=True)
+            n_logged = log_top5(ema_only)
+            st.caption(f"📝 Logged top {n_logged} (by Price_Increase_%_5Bars) to `{os.path.basename(TOP5_LOG_PATH)}` at this run's timestamp.")
 
-# ============================================================
+# ==============================================================================
+# TOP-5 RUNNING LOG
+# ==============================================================================
+st.write("### 📝 Top-5 Log (across runs)")
+
+log_col1, log_col2 = st.columns([3, 1])
+with log_col2:
+    if "confirm_reset_log" not in st.session_state:
+        st.session_state["confirm_reset_log"] = False
+
+    if not st.session_state["confirm_reset_log"]:
+        if st.button("Reset Log"):
+            st.session_state["confirm_reset_log"] = True
+    else:
+        st.warning("This clears the entire log. Confirm?")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Yes, clear it"):
+                reset_top5_log()
+                st.session_state["confirm_reset_log"] = False
+                st.success("Log cleared.")
+        with c2:
+            if st.button("Cancel"):
+                st.session_state["confirm_reset_log"] = False
+
+top5_log_df = load_top5_log()
+with log_col1:
+    if top5_log_df.empty:
+        st.info("No entries logged yet. Run the model at least once with qualifying tickers to start building history.")
+    else:
+        st.dataframe(top5_log_df.sort_values("Run_Timestamp_ET", ascending=False), use_container_width=True)
+        st.caption(f"{len(top5_log_df)} total logged entries · file: `{TOP5_LOG_PATH}`")
+
+# ==============================================================================
 # REJECTION DIAGNOSTICS
-# ============================================================
-
-st.markdown(
-    "### 🧪 Rejection Diagnostics"
-)
-
-st.caption(
-
-    "This table records where each ticker "
-    "failed. QUALIFIED rows are also included "
-    "so we can compare a ticker such as PENG "
-    "against the exact conditions used by "
-    "the model."
-)
-
-if (
-    rejections is not None
-    and not rejections.empty
-):
-
-    diag_cols = [
-
-        "Ticker",
-
-        "Status",
-
-        "Reason",
-
-        "Price",
-
-        "Opportunity_Category",
-
-        "Session_Phase",
-
-        "Avg_Volume_20d",
-
-        "EMA_Score",
-
-        "Price_Increase_%_5Bars",
-
-        "Price_Increase_Score",
-
-        "Price_Above_EMA9",
-
-        "Price_Above_EMA20",
-
-        "EMA9_Above_EMA20",
-
-        "EMA9_Slope_Pos",
-
-        "EMA20_Slope_Pos",
-
-        "Last5_Above_EMA9",
-
-        "LastBar_Higher_3",
-
-        "LastBar_Higher_4",
-
-        "Development_Signal",
-
-        "Development_Current_Above_EMA9",
-
-        "Development_Previous4_Below_EMA9",
-
-        "Development_Recent2_Above_EMA9",
-
-        "Development_Preceding3_Below_EMA9",
-
-        "Development_Transition_Type",
-
-        "Last5_Rising_Trend",
-
-        "Development_Reason",
-
-        "Daily_Data",
-
-        "Intraday_Data",
-
-        "Latest_Real_Day"
-    ]
-
-    diag_cols = [
-
-        c
-
-        for c in diag_cols
-
-        if c in rejections.columns
-    ]
-
-    st.dataframe(
-
-        rejections[diag_cols],
-
-        hide_index=True,
-
-        use_container_width=True
-    )
-
-    # ========================================================
-    # INDIVIDUAL TICKER DIAGNOSTIC
-    # ========================================================
-
-    diagnostic_ticker = st.selectbox(
-
-        "Select ticker for rejection diagnostics",
-
-        sorted(
-            rejections[
-                "Ticker"
-            ]
-            .astype(str)
-            .unique()
-            .tolist()
-        ),
-
-        key="ema_alignment_rejection_ticker"
-    )
-
-    if diagnostic_ticker:
-
-        row = rejections[
-
-            rejections[
-                "Ticker"
-            ].astype(str)
-            == str(diagnostic_ticker)
-
-        ].iloc[0]
-
-
-        st.markdown(
-
-            f"#### 🔎 {diagnostic_ticker}"
-        )
-
-        st.write(
-
-            f"**Status:** "
-            f"{row['Status']}"
-        )
-
-
-        st.write(
-
-            f"**Reason:** "
-            f"{row['Reason']}"
-        )
-
-        st.write(
-
-            f"**Latest real trading day:** "
-            f"{row['Latest_Real_Day']}"
-        )
-
-        st.write(
-
-            f"**Price:** "
-            f"{row['Price']}"
-        )
-
-        st.write(
-
-            f"**EMA Alignment Score:** "
-            f"{row['EMA_Score']} / 8"
-        )
-
-        st.write(
-
-            f"**Price Increase:** "
-            f"{row['Price_Increase_%_5Bars']}%"
-        )
-
-        st.write(
-
-            f"**Price Increase Score:** "
-            f"{row['Price_Increase_Score']}"
-        )
-
-        if "Development_Signal" in row.index:
-            st.write(
-                f"**Development Signal:** "
-                f"{row['Development_Signal']}"
-            )
-
-        if "Development_Reason" in row.index:
-            st.write(
-                f"**Development Reason:** "
-                f"{row['Development_Reason']}"
-            )
-
-        if "Development_Current_Above_EMA9" in row.index:
-            st.write(
-                f"**Recent EMA9 Cross:** "
-                f"{row['Development_Current_Above_EMA9']}"
-            )
-
-        if "Development_Previous4_Below_EMA9" in row.index:
-            st.write(
-                f"**Previous 4 closes at/below EMA9:** "
-                f"{row['Development_Previous4_Below_EMA9']}"
-            )
-
-        if "Development_Transition_Type" in row.index:
-            st.write(
-                f"**Development Transition Type:** "
-                f"{row['Development_Transition_Type']}"
-            )
-
-        if "Last5_Rising_Trend" in row.index:
-            st.write(
-                f"**Last 5 Rising Trend:** "
-                f"{row['Last5_Rising_Trend']}"
-            )
-
-        st.write(
-            "**Condition results:**"
-        )
-
-        conditions = {
-
-            "Price > EMA9":
-                row[
-                    "Price_Above_EMA9"
-                ],
-
-            "Price > EMA20":
-                row[
-                    "Price_Above_EMA20"
-                ],
-
-            "EMA9 > EMA20":
-                row[
-                    "EMA9_Above_EMA20"
-                ],
-
-            "EMA9 slope positive":
-                row[
-                    "EMA9_Slope_Pos"
-                ],
-
-            "EMA20 slope positive":
-                row[
-                    "EMA20_Slope_Pos"
-                ],
-
-            "All last 5 closes > EMA9":
-                row[
-                    "Last5_Above_EMA9"
-                ],
-
-            "Latest bar > bar -3":
-                row[
-                    "LastBar_Higher_3"
-                ],
-
-            "Latest bar > bar -4":
-                row[
-                    "LastBar_Higher_4"
-                ],
-
-            "Development: recent EMA9 upside cross":
-                row.get(
-                    "Development_Current_Above_EMA9",
-                    "N/A"
-                ),
-
-            "Development: previous 4 closes at/below EMA9":
-                row.get(
-                    "Development_Previous4_Below_EMA9",
-                    "N/A"
-                )
-        }
-
-        for name, result in conditions.items():
-
-            st.write(
-
-                f"- **{name}:** "
-                f"{result}"
-            )
-
-# ============================================================
-# NO RESULTS
-# ============================================================
-
-else:
-
-    if (
-
-        ranking is not None
-        and ranking.empty
-
-        and rejections is not None
-        and not rejections.empty
-
-    ):
-
-        st.info(
-
-            "No tickers qualified. "
-            "Use the Rejection Diagnostics "
-            "table to see exactly why."
-        )
+# ==============================================================================
+if results is not None:
+    st.write("### 🧪 Rejection Diagnostics")
+    st.write(f"Total Rejects: {len(rejects)}")
+
+    if rejects.empty:
+        st.info("No rejections recorded.")
+    else:
+        st.write("### Rejection Summary")
+        st.write(rejects["Reason"].value_counts())
+
+        ticker_list = sorted(rejects["Ticker"].unique())
+        selected = st.selectbox("Select ticker for rejection diagnostics", ticker_list)
+
+        diag = rejects[rejects["Ticker"] == selected]
+        st.dataframe(diag, use_container_width=True)
