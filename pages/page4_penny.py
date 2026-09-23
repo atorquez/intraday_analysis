@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # PAGE CONFIG
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Penny Model")
-st.caption("Version: V3 — Daily-first pre-filter, threaded intraday fetch")
+st.caption("Version: V4 — Daily-first pre-filter, threaded intraday fetch, decoupled cache TTLs")
 st.title("📈 Penny Model")
 
 # ==============================================================================
@@ -23,18 +23,40 @@ st.title("📈 Penny Model")
 MIN_DAILY_HISTORY = 40
 MIN_INTRADAY_BARS = 5
 MIN_REAL_DAY_BARS = 10
+# DEPRECATED as a filter: no longer used to reject tickers (see
+# daily_prefilter() and the engine's price/volume section for why — a
+# 20-day average smooths away the catalyst-spike behavior this model is
+# built to catch). Left here only because Avg_Volume_20d is still
+# computed and shown as informational context in the output tables.
 MIN_AVG_VOLUME_20D = 80000
 
-# How much slack to give the daily-close price filter before fetching
-# intraday data. Intraday price can drift from the prior daily close, so
-# the pre-filter range is intentionally a bit wider than the user's actual
-# min/max — the final, exact price check still happens later using the
-# real intraday price. This just avoids fetching minute bars for tickers
-# that have no realistic chance of landing in range.
-PREFILTER_PRICE_BUFFER_PCT = 0.15  # 15% slack on each side
+# DEPRECATED: previously used to give the daily-close price pre-filter
+# some slack. Removed from daily_prefilter() — a buffered price check on
+# YESTERDAY's close rejects exactly the kind of dramatic gap/crash movers
+# this model exists to catch (e.g. a $50 close crashing to $3, or a $0.40
+# close spiking to $6). The exact price range is still enforced in Stage 2
+# using the real intraday price. Left here (unused) in case a lighter,
+# non-price-based efficiency filter is wanted later.
+PREFILTER_PRICE_BUFFER_PCT = 0.15  # no longer used by daily_prefilter()
 
 # Max concurrent Yahoo requests for the intraday fetch stage.
 INTRADAY_MAX_WORKERS = 20
+
+# --------------------------------------------------------------------------
+# CACHE TTLs — decoupled on purpose.
+#
+# Daily history (3mo of daily bars per ticker) does NOT change intraday —
+# it only needs to be refreshed once per trading session, not every scan.
+# Intraday 1-minute bars DO need to be fresh close to every scan.
+#
+# Previously both used the same 120s TTL, so every "Run Model" click that
+# happened more than 2 minutes after the last one re-downloaded 3mo of
+# daily history for the ENTIRE universe (3,700 tickers) from scratch, even
+# though that data hadn't actually changed since the session opened. That
+# was pure wasted time on every run after the first.
+# --------------------------------------------------------------------------
+DAILY_CACHE_TTL_SECONDS = 6 * 60 * 60   # 6 hours — effectively "once per session"
+INTRADAY_CACHE_TTL_SECONDS = 120        # 2 minutes — must stay fresh for live scans
 
 # Where the top-5-per-run log persists across separate script runs (not
 # just within one browser session). Lives next to this script file so it
@@ -219,12 +241,17 @@ def load_top5_log(log_path=TOP5_LOG_PATH):
 # ==============================================================================
 # MARKET DATA
 # ==============================================================================
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=DAILY_CACHE_TTL_SECONDS, show_spinner=False)
 def fetch_daily_batch(tickers_tuple):
     """One batched call for daily history across the whole universe.
     This is cheap regardless of universe size, so it always runs on the
     full ticker list — the expensive per-ticker intraday fetch below is
-    what we shrink with the pre-filter."""
+    what we shrink with the pre-filter.
+
+    TTL is now DAILY_CACHE_TTL_SECONDS (6h), not the 2-minute intraday
+    TTL — 3mo of daily bars doesn't change intraday, so re-downloading it
+    for all ~3,700 tickers on every single scan (as the old shared-TTL
+    version did) was pure wasted time on every run after the first."""
     tickers = list(tickers_tuple)
     if not tickers:
         return pd.DataFrame()
@@ -239,7 +266,7 @@ def fetch_daily_batch(tickers_tuple):
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=INTRADAY_CACHE_TTL_SECONDS, show_spinner=False)
 def fetch_intraday_batch(tickers_tuple, max_workers=INTRADAY_MAX_WORKERS):
     """Threaded, per-ticker intraday fetch — call this ONLY with the
     pre-filtered candidate list, not the full universe. Yahoo has no
@@ -247,7 +274,10 @@ def fetch_intraday_batch(tickers_tuple, max_workers=INTRADAY_MAX_WORKERS):
     stays per-ticker, but running the requests concurrently instead of
     sequentially cuts wall-clock time roughly by the worker count, and
     shrinking the input list first cuts it further (and avoids Yahoo
-    rate-limiting on 1,000+ back-to-back requests)."""
+    rate-limiting on 1,000+ back-to-back requests).
+
+    TTL stays short (INTRADAY_CACHE_TTL_SECONDS, 2 minutes) — this data
+    genuinely needs to be fresh close to every scan during market hours."""
     tickers = list(tickers_tuple)
     if not tickers:
         return pd.DataFrame()
@@ -297,11 +327,30 @@ def fetch_intraday_batch(tickers_tuple, max_workers=INTRADAY_MAX_WORKERS):
 def daily_prefilter(tickers, daily_batch, min_price, max_price):
     """Use the already-fetched daily batch (free — no extra network calls)
     to shrink the universe down to tickers worth fetching intraday data
-    for. Filters on: daily history depth, prior-close price roughly in
-    range, and 20-day average volume. This is the step that makes the
-    model fast enough to re-run every 2-3 minutes: it turns "1,043
-    sequential minute-bar fetches" into "N sequential minute-bar fetches,"
-    where N is usually a small fraction of the universe.
+    for. Filters ONLY on daily history depth — i.e. "has this ticker
+    existed and traded for at least 40 days" (not a brand-new listing
+    with too little history to be reliable data).
+
+    Price and 20-day average volume are intentionally NOT checked here.
+    Both used to reject tickers based on a lagging historical baseline
+    that fights the exact thing this model hunts for:
+      - Price: a ticker that closed well outside your range yesterday and
+        gapped/crashed dramatically INTO it today is a legitimate mover,
+        not noise.
+      - Volume: penny stocks are often quiet for weeks and only spike on
+        a catalyst day. A 20-day AVERAGE smooths that spike away — a
+        ticker could be dead quiet for 19 days and explode on day 20, and
+        still fail an 80,000-share average even on the exact day you'd
+        want to catch it.
+    Both the exact price and the (now informational-only, non-blocking)
+    volume figure are still computed and shown in Stage 2/3 using real
+    current data — this stage just no longer pre-judges on stale history.
+
+    Trade-off: removing these checks means MOST of the universe now
+    survives to the (expensive) intraday fetch stage — only daily-history
+    depth trims anything here. Expect intraday fetch time to increase
+    substantially versus earlier versions; worth checking actual runtime
+    on your next run rather than assuming it's still fine for your cadence.
 
     Returns (candidates: list[str], prefilter_rejects: list[dict]).
     """
@@ -312,9 +361,6 @@ def daily_prefilter(tickers, daily_batch, min_price, max_price):
         for t in tickers:
             prefilter_rejects.append(_rejection_row(t, "No daily data"))
         return candidates, prefilter_rejects
-
-    lo = min_price * (1 - PREFILTER_PRICE_BUFFER_PCT)
-    hi = max_price * (1 + PREFILTER_PRICE_BUFFER_PCT)
 
     for ticker in tickers:
         daily = _flatten_columns(_extract_ticker_slice(daily_batch, ticker))
@@ -329,29 +375,10 @@ def daily_prefilter(tickers, daily_batch, min_price, max_price):
             prefilter_rejects.append(_rejection_row(ticker, "Insufficient daily history"))
             continue
 
-        last_close = pd.to_numeric(daily["Close"], errors="coerce").dropna()
-        if last_close.empty:
-            prefilter_rejects.append(_rejection_row(ticker, "No valid daily close"))
-            continue
-        last_close = float(last_close.values[-1])
-
-        if last_close < lo or last_close > hi:
-            prefilter_rejects.append(_rejection_row(ticker, "Price outside range (daily pre-filter)"))
-            continue
-
-        vol = pd.to_numeric(daily["Volume"], errors="coerce").dropna().values.astype(float)
-        if len(vol) < 20:
-            prefilter_rejects.append(_rejection_row(ticker, "Insufficient volume history"))
-            continue
-
-        avg_vol = float(np.mean(vol[-20:]))
-        if avg_vol < MIN_AVG_VOLUME_20D:
-            prefilter_rejects.append(_rejection_row(ticker, "Low volume (daily pre-filter)"))
-            continue
-
         candidates.append(ticker)
 
     return candidates, prefilter_rejects
+
 
 # ==============================================================================
 # SCORING
@@ -405,11 +432,6 @@ def ema_alignment_engine(tickers, daily_batch, intra_batch, min_price, max_price
         return pd.DataFrame(), pd.DataFrame(rejects)
 
     # --- Pre-filter tickers missing from the Yahoo batch entirely -----------
-    # FIX: previously referenced undefined `daily`/`intra` (only the params
-    # `daily_batch`/`intra_batch` existed at this point), which raised a
-    # NameError caught by the bare except below and silently fell back to
-    # `active = sorted(tickers)` every single run. Now correctly checks the
-    # actual batch frames passed into the function.
     try:
         available_daily = set(daily_batch.columns.get_level_values(0))
         available_intra = set(intra_batch.columns.get_level_values(0))
@@ -500,30 +522,20 @@ def ema_alignment_engine(tickers, daily_batch, intra_batch, min_price, max_price
             rejects.append(r)
             continue
 
+        # Avg_Volume_20d is now INFORMATIONAL ONLY — shown for context but
+        # no longer gates qualification. A 20-day average smooths away
+        # exactly the catalyst-driven spike behavior this model hunts for:
+        # a ticker quiet for 19 days that explodes on day 20 can easily
+        # average under the old 80,000 threshold even on the day you'd
+        # actually want to catch it. No minimum history length required
+        # either — whatever volume data is available gets averaged as-is.
         vol = pd.to_numeric(daily["Volume"], errors="coerce").dropna().values.astype(float)
-        if len(vol) < 20:
-            r["Reason"] = "Insufficient volume history"
-            rejects.append(r)
-            continue
-
-        avg_vol = float(np.mean(vol[-20:]))
-        r["Avg_Volume_20d"] = round(avg_vol, 0)
-
-        if avg_vol < MIN_AVG_VOLUME_20D:
-            r["Reason"] = "Low volume"
-            rejects.append(r)
-            continue
+        if len(vol) > 0:
+            avg_vol = float(np.mean(vol[-20:])) if len(vol) >= 20 else float(np.mean(vol))
+            r["Avg_Volume_20d"] = round(avg_vol, 0)
+        # else: leave as NaN (from _rejection_row default) — no data, no rejection either
 
         # --- Stale (no-trade) bar check -------------------------------------
-        # Thinly-traded penny stocks often have 1-minute windows with zero
-        # trades. Yahoo doesn't drop or NaN those bars — it forward-fills
-        # OHLC with the last traded price (Volume = 0), which is why you'll
-        # sometimes see Bar4_Close == Bar5_Close. A "5-bar breakout" built
-        # mostly out of forward-filled bars is a weaker signal: the price
-        # "held" because nothing traded, not because buyers defended it.
-        # We check intraday minute-bar Volume (not the daily 20d average
-        # already checked above) on exactly the same 5 bars used for last5,
-        # via the shared index, so this lines up 1:1 with what's displayed.
         last5_index = close_series_clean.tail(5).index
         bar_vol_last5 = pd.to_numeric(intra["Volume"], errors="coerce").reindex(last5_index).fillna(0.0)
         stale_bars_last5 = int((bar_vol_last5 <= 0).sum())
@@ -559,13 +571,11 @@ def ema_alignment_engine(tickers, daily_batch, intra_batch, min_price, max_price
 
         # ============================
         # Consistency score (0 to 1)
-        # Measures how stable the 5-bar trend is
         # ============================
         diffs = np.diff(last5)
         up_moves = np.sum(diffs > 0)
         down_moves = np.sum(diffs < 0)
 
-        # Consistency = proportion of bars moving in the dominant direction
         if up_moves >= down_moves:
             consistency_score = up_moves / 4.0
         else:
@@ -597,15 +607,6 @@ def ema_alignment_engine(tickers, daily_batch, intra_batch, min_price, max_price
 
         dev_signal = dev_base and dev_cross and acceleration
 
-        # ============================
-        # Strength thresholds
-        # FIX: slopes and regression slope are now expressed as a fraction
-        # of price (like `pressure` already was) instead of raw dollar
-        # amounts. Raw-dollar thresholds made the filter far stricter for
-        # low-priced names and far looser for higher-priced names within
-        # the same $1-$10 scan range, which isn't apples-to-apples for a
-        # penny-stock screener.
-        # ============================
         MIN_EMA9_SLOPE_PCT = 0.0015       # 0.15% of price per bar
         MIN_EMA20_SLOPE_PCT = 0.0008      # 0.08% of price per bar
         MIN_REGRESSION_SLOPE_PCT = 0.0012 # 0.12% of price per bar
@@ -616,25 +617,21 @@ def ema_alignment_engine(tickers, daily_batch, intra_batch, min_price, max_price
         ema20_slope_pct = ema20_slope / price if price else 0
         reg_slope_pct = reg_slope / price if price else 0
 
-        # ============================
-        # EMA (strong alignment)
-        # ============================
-        cond_align = (
-            price > ema9_now and
-            price > ema20_now and
-            ema9_now > ema20_now and
-            ema9_slope_pct > MIN_EMA9_SLOPE_PCT and
-            ema20_slope_pct > MIN_EMA20_SLOPE_PCT and
-            reg_slope_pct > MIN_REGRESSION_SLOPE_PCT and
-            pressure > MIN_PRESSURE and
-            consistency_score >= MIN_CONSISTENCY
-        )
+        checks = [
+            ("price > EMA9", price > ema9_now, price, ema9_now),
+            ("price > EMA20", price > ema20_now, price, ema20_now),
+            ("EMA9 > EMA20", ema9_now > ema20_now, ema9_now, ema20_now),
+            ("EMA9 slope %", ema9_slope_pct > MIN_EMA9_SLOPE_PCT, ema9_slope_pct, MIN_EMA9_SLOPE_PCT),
+            ("EMA20 slope %", ema20_slope_pct > MIN_EMA20_SLOPE_PCT, ema20_slope_pct, MIN_EMA20_SLOPE_PCT),
+            ("Regression slope %", reg_slope_pct > MIN_REGRESSION_SLOPE_PCT, reg_slope_pct, MIN_REGRESSION_SLOPE_PCT),
+            ("Pressure", pressure > MIN_PRESSURE, pressure, MIN_PRESSURE),
+            ("Consistency", consistency_score >= MIN_CONSISTENCY, consistency_score, MIN_CONSISTENCY),
+        ]
+        cond_align = all(passed for _, passed, _, _ in checks)
 
-        # ============================
-        # Classification (EMA only)
-        # ============================
         if not cond_align:
-            r["Reason"] = "Failed EMA criteria"
+            failed = [f"{name}: {actual:.5g} (need {required:.5g})" for name, passed, actual, required in checks if not passed]
+            r["Reason"] = "Failed EMA criteria — " + "; ".join(failed)
             rejects.append(r)
             continue
 
@@ -646,23 +643,18 @@ def ema_alignment_engine(tickers, daily_batch, intra_batch, min_price, max_price
         rows.append({
             "Ticker": ticker,
             "Close": round(price, 2),
+            "Avg_Volume_20d": r["Avg_Volume_20d"],
             "Bar1_Close": round(last5[0], 4),
             "Bar2_Close": round(last5[1], 4),
             "Bar3_Close": round(last5[2], 4),
             "Bar4_Close": round(last5[3], 4),
             "Bar5_Close": round(last5[4], 4),
-            # Per-bar (1-minute) traded volume — NOT the 20-day daily
-            # average. This is the actual shares that traded in each of
-            # the last 5 individual minute bars, so you can see the
-            # difference between e.g. a ~50-share print that barely moves
-            # price vs. a ~1,000+ share print that does. Distinct from
-            # Stale_Bars_Last5 (which only asks "was it > 0"), this shows
-            # magnitude, not just presence/absence of trading.
             "Bar1_Volume": int(bar_vol_values[0]),
             "Bar2_Volume": int(bar_vol_values[1]),
             "Bar3_Volume": int(bar_vol_values[2]),
             "Bar4_Volume": int(bar_vol_values[3]),
             "Bar5_Volume": int(bar_vol_values[4]),
+            "Avg_Volume_Last5Bars": round(float(np.mean(bar_vol_values)), 1),
             "Bar4_EMA9": round(Bar4_EMA9, 4),
             "Bar4_EMA20": round(Bar4_EMA20, 4),
             "Bar5_EMA9": round(Bar5_EMA9, 4),
@@ -670,29 +662,10 @@ def ema_alignment_engine(tickers, daily_batch, intra_batch, min_price, max_price
             "Price_Increase_%_5Bars": round(pct, 3),
             "Development_Signal": bool(dev_signal),
             "Status": status,
-            # Which session these bars actually came from. yfinance's
-            # period="1d" returns the most recently COMPLETED session, not
-            # strictly "today" — e.g. on a Sunday it silently hands back
-            # Friday's bars. This column makes that visible in the
-            # dataframe instead of it being an invisible assumption.
             "Latest_Real_Day": str(latest_day),
-            # Count of bars among the last 5 with zero intraday volume —
-            # i.e. no actual trade happened, Yahoo forward-filled the price
-            # from the prior bar. High values mean the "5-bar move" is
-            # partly/mostly not real trading activity.
             "Stale_Bars_Last5": stale_bars_last5,
         })
-        # NOTE: loop continues to the next ticker here — this is the critical
-        # fix. Previously the final-assembly/return block below was indented
-        # one level too deep (inside this `for` loop), so the function
-        # returned after the FIRST ticker that passed the EMA filter and
-        # every ticker after it in the universe was never evaluated.
 
-    # ============================
-    # Final assembly and return
-    # FIX: moved OUTSIDE the `for ticker in active:` loop so the full
-    # universe is scanned before returning.
-    # ============================
     ranking = pd.DataFrame(rows)
     rejects_df = pd.DataFrame(rejects)
 
@@ -707,16 +680,6 @@ def ema_alignment_engine(tickers, daily_batch, intra_batch, min_price, max_price
 # ==============================================================================
 # PAGE EXECUTION
 # ==============================================================================
-# ==============================================================================
-# MARKET-DAY / DATA-FRESHNESS CHECK
-# ==============================================================================
-# yfinance's period="1d" intraday request returns the most recently
-# COMPLETED session's bars, not "today's bars or nothing." Outside market
-# hours (weekends, holidays, pre-open) that means every ticker that scores
-# is being scored on a STALE session (e.g. last Friday), which looks
-# identical in the table to a live signal unless you check the date. This
-# banner makes the distinction explicit so results are never mistaken for
-# live intraday signals when the market isn't actually open.
 _eastern = ZoneInfo("America/New_York")
 _now_et = datetime.now(_eastern)
 _is_weekday = _now_et.weekday() < 5  # Mon=0 ... Sun=6
@@ -764,16 +727,12 @@ import time
 # RUN BUTTON
 # ==============================================================================
 # The full pipeline (daily fetch + pre-filter + threaded intraday fetch +
-# engine) is expensive — tens of seconds even with caching helping on
-# reruns within the same 2-minute TTL window. Without a run button,
-# Streamlit re-executes this whole script top-to-bottom on EVERY widget
-# interaction anywhere on the page — including unrelated ones, like
-# picking a ticker in the rejection-diagnostics selectbox further down —
-# which means the entire fetch pipeline would silently refire just from
-# clicking around the page, not just when you actually want a fresh scan.
-# Gating it behind a button, and caching the results in session_state, so
-# the model only runs when you explicitly ask it to, and other widget
-# interactions on the page just redraw from the last run's stored results.
+# engine) is expensive. With decoupled cache TTLs, the daily-history fetch
+# (100s+ for the full universe) is now cached for DAILY_CACHE_TTL_SECONDS
+# (6h) instead of 120s — so only the FIRST run of the trading session pays
+# that cost. Every run after that, within the same 6h window, reuses the
+# cached daily batch and only re-does the intraday fetch + engine, which
+# is where freshness actually matters minute to minute.
 run_clicked = st.button("🚀 Run Model", type="primary")
 
 if run_clicked:
@@ -795,9 +754,6 @@ if run_clicked:
 
     rejects = pd.concat([pd.DataFrame(prefilter_rejects), engine_rejects], ignore_index=True)
 
-    # Persist everything the display sections below need, so they can
-    # render from session_state on reruns triggered by OTHER widgets
-    # (e.g. the rejection-ticker selectbox) without re-fetching anything.
     st.session_state["model_results"] = {
         "ranking": ranking,
         "rejects": rejects,
@@ -826,12 +782,9 @@ else:
         f"intraday fetch {t3 - t2:.2f}s [{results['n_candidates']}/{results['n_universe']} tickers] · "
         f"engine {t4 - t3:.2f}s)"
     )
+    if (t1 - t0) < 2.0:
+        st.caption("✅ Daily fetch served from cache (fast) — daily history is cached for 6h, not re-downloaded every run.")
 
-    # Tag every ranking/rejects row with whether it's on the curated
-    # movers list, recomputed fresh from the CURRENT movers list on every
-    # script rerun (not frozen at click time) — so editing
-    # data/movers_list.py between runs updates tags immediately without
-    # needing to click Run Model again.
     movers_set = set(movers)
     if not ranking.empty:
         ranking = ranking.copy()
@@ -840,15 +793,6 @@ else:
         rejects = rejects.copy()
         rejects["Watchlist"] = rejects["Ticker"].apply(lambda t: "Movers List" if t in movers_set else "Not Movers List")
 
-    # ==========================================================================
-    # MOVERS SCORECARD — the direct answer to "what happened to each of my
-    # known movers this run?" One row per curated ticker: qualified (with
-    # its numbers), rejected (with the exact reason — this is what would
-    # have told you immediately why GRML-style misses happen), or not even
-    # in the scanned universe at all (catches foreign-listing / wrong-
-    # exchange gaps like GRML directly, instead of discovering it after
-    # the fact from an outside chart).
-    # ==========================================================================
     if movers:
         st.write("### 🔥 Movers List Scorecard")
         scorecard_rows = []

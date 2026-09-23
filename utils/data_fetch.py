@@ -1,6 +1,7 @@
-# utils/data_fetch.py — Integrated with Master US Universe
+# utils/data_fetch.py — Shared universe for every model (penny, momentum, ...)
 import yfinance as yf
 import pandas as pd
+
 
 def get_last_10_closes(symbol: str):
     """
@@ -51,39 +52,45 @@ def get_last_10_closes(symbol: str):
 
 
 # ---------------------------------------------------------
-# LOAD UNIVERSE (Unified US Market Basket)
+# LOAD UNIVERSE (Unified, price-agnostic US market basket)
 # ---------------------------------------------------------
+# CHANGE: us_universe_list.py no longer has a price range baked into it
+# (see generate_universe.py). The same file/list is now shared by every
+# model — penny (1-10), momentum (40-120), or anything else — and each
+# model's own min_price/max_price widget does the actual price filtering,
+# live, against current data. This also removes the old failure mode where
+# forgetting to regenerate the file after switching models meant a scan
+# silently ran against the wrong price range with no error.
 try:
-    from data.us_universe_list import us_universe
+    from data.us_universe_list import us_universe, us_universe_exchange
 except ImportError:
     print("WARNING: data.us_universe_list not found. Falling back to an empty list.")
     us_universe = []
+    us_universe_exchange = {}
+
 
 def load_universe():
     """
-    Returns the combined trading universe for the Intraday Ranker.
-    Includes all deduplicated NYSE and NASDAQ tickers ($40–$110).
+    Returns the full, price-agnostic combined trading universe
+    (deduplicated NYSE + NASDAQ common stock). Every model filters this
+    down to its own price range live, at scan time.
     """
-    return sorted(list(set(us_universe)))
+    return sorted(set(us_universe))
 
 
 # ---------------------------------------------------------
-# UNIVERSE SOURCE HELPER (Upgraded to Exchange Level)
+# UNIVERSE SOURCE HELPER
 # ---------------------------------------------------------
 def get_universe_source(ticker: str):
     """
-    Identifies the underlying exchange for a given ticker symbol.
-    Uses standard US market listing structures to classify:
-    - NASDAQ: Primarily 4-character symbols (e.g., AAPL, MSFT)
-    - NYSE: Primarily 1, 2, or 3-character symbols (e.g., T, KO, JPM)
+    Returns the exchange a ticker was actually sourced from
+    (NASDAQ / NYSE), as tagged by generate_universe.py at build time from
+    which source CSV the ticker came from.
+
+    CHANGE: previously guessed NASDAQ vs NYSE from ticker symbol length
+    (>=4 chars -> NASDAQ), which is unreliable in both directions (many
+    NASDAQ tickers are 1-3 letters; NYSE has 4-letter tickers too). Now
+    looks up the real tag carried through from the source file.
     """
     clean_ticker = ticker.strip().upper()
-    
-    if clean_ticker not in us_universe:
-        return "UNKNOWN"
-        
-    # Standard rule of thumb: NASDAQ uses 4+ letters, NYSE uses 1-3 letters
-    if len(clean_ticker) >= 4:
-        return "NASDAQ"
-    
-    return "NYSE"
+    return us_universe_exchange.get(clean_ticker, "UNKNOWN")
