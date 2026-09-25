@@ -604,6 +604,16 @@ def momentum_rank_universe_batch(
             ):
                 continue
 
+            # ---------------------------------------------
+            # DAILY PRICE PRE-FILTER (40–120)
+            # ---------------------------------------------
+            try:
+                last_close = float(daily_df["Close"].iloc[-1])
+                if last_close < min_price or last_close > max_price:
+                    continue
+            except Exception:
+                continue
+
             # ------------------------------------------------------------------
             # Normalize intraday timezone.
             # ------------------------------------------------------------------

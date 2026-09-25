@@ -17,10 +17,12 @@
 
 def load_movers():
     return [
-        "BENF",
-        "WHLR",
-        "IMCC",
-        "IPON",
-        "DCOY",
-        "LXEH"
+        "GCTK",
+        "APUS",
+        "PFSA",
+        "WETO",
+        "NCPL",
+        "SPHL",
+        "SKYQ",
+        "UXIN"
             ]
