@@ -1,5 +1,5 @@
 # ==============================================================================
-# 📈 PENNY MODEL — Clean & Patched Version (Standalone Page 4)
+# 📈 WARRIOR MODEL — Clean & Patched Version (Standalone Page 4)
 # ==============================================================================
 import streamlit as st
 import numpy as np
@@ -14,8 +14,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # PAGE CONFIG
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Penny Model")
-st.caption("Version: V6 — Price-acceleration engine (EMA no longer gates, kept as informational tag)")
-st.title("📈 Penny Model")
+st.caption("Version: W1 — Warrior model, adapted from Penny Model V6. Fixed: slope threshold "
+           "was silently read from a bare global instead of being passed in; prior-close "
+           "now robust to whether Yahoo's daily bar for 'today' updates live during market hours.")
+st.title("📈 Price Acceleration Model")
 
 # ==============================================================================
 # MODEL PARAMETERS
@@ -34,25 +36,17 @@ MIN_AVG_VOLUME_20D = 80000
 PREFILTER_PRICE_BUFFER_PCT = 0.15  # currently unused
 
 # --------------------------------------------------------------------------
-# PRICE-ACCELERATION ENGINE THRESHOLDS (V6)
+# PRICE-ACCELERATION ENGINE THRESHOLDS
 #
-# MIN_REG_SLOPE_PCT is expressed as a fraction of price per bar, NOT a raw
-# dollar amount. An earlier draft of this engine used a raw threshold
-# (0.02 per bar, unnormalized) — that repeats the exact "borrowed from
-# institutional pricing" problem this project identified and fixed once
-# already: a $1.50 stock needs a much bigger PERCENTAGE move than a $4.50
-# stock to clear the same raw dollar slope, which unfairly penalizes the
-# low end of your price range. This matters directly for the $1-2 vs
-# $2-5 comparison test — an unnormalized threshold would confound that
-# comparison with an unrelated bias.
-#
-# Starting value chosen to roughly preserve the real-world strictness the
-# raw 0.02 threshold had for tickers in the ~$3-5 zone (where most of
-# today's confirmed examples, like GLND, were trading) — NOT independently
-# derived or validated. Treat this as a first guess to calibrate against
-# your own data, the same way MIN_CONSISTENCY and the old EMA thresholds
-# were tuned.
-MIN_REG_SLOPE_PCT = 0.005   # 0.5% of price per bar
+# MIN_REG_SLOPE_PCT is the DEFAULT used if no override is passed in. The
+# Streamlit UI below lets you override this live via a number_input
+# (min_reg_slope_pct) — FIX: previously the engine read that UI value as a
+# bare module-level global instead of accepting it as a parameter, which
+# silently made this constant dead code and was fragile (would break with
+# a confusing NameError if this function were ever called from anywhere
+# else, e.g. a test or another page). Now it's an explicit parameter with
+# this constant as its default.
+MIN_REG_SLOPE_PCT = 0.005   # 0.5% of price per bar — starting default only
 MIN_CONSISTENCY = 0.25      # loosened from the old EMA version's 0.60 —
                             # quite permissive; worth watching whether this
                             # lets through mostly-flat/choppy tickers.
@@ -62,10 +56,6 @@ INTRADAY_MAX_WORKERS = 20
 
 # --------------------------------------------------------------------------
 # CACHE TTLs — decoupled on purpose.
-#
-# Daily history (3mo of daily bars per ticker) does NOT change intraday —
-# it only needs to be refreshed once per trading session, not every scan.
-# Intraday 1-minute bars DO need to be fresh close to every scan.
 # --------------------------------------------------------------------------
 DAILY_CACHE_TTL_SECONDS = 6 * 60 * 60   # 6 hours — effectively "once per session"
 INTRADAY_CACHE_TTL_SECONDS = 120        # 2 minutes — must stay fresh for live scans
@@ -74,9 +64,11 @@ INTRADAY_CACHE_TTL_SECONDS = 120        # 2 minutes — must stay fresh for live
 import os
 TOP5_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "top5_log.csv")
 TOP5_LOG_COLUMNS = [
-    "Run_Timestamp_ET", "Ticker", "Close", "Price_Increase_%_5Bars",
-    "Avg_Volume_Last5Bars", "Segment_Signal",
-    "Status", "Development_Signal", "Latest_Real_Day", "Stale_Bars_Last5",
+    "Run_Timestamp_ET", "Ticker", "Close",
+    "Volume_Day_vs_50d", "Price_Open_PrevClose_%",
+    "Price_Increase_%_5Bars", "Avg_Volume_Last5Bars",
+    "Segment_Signal", "Status", "Development_Signal",
+    "Latest_Real_Day", "Stale_Bars_Last5",
 ]
 
 # ==============================================================================
@@ -138,6 +130,43 @@ def _to_eastern_index(df):
     else:
         df.index = idx.tz_localize(eastern)
     return df
+
+def _prior_close_row(daily_df):
+    """Return (row, was_today_row: bool) for the daily bar that represents
+    the most recently COMPLETED session's close — i.e. genuinely
+    "yesterday's close" — not an in-progress, still-updating "today" bar.
+
+    WHY THIS EXISTS: it's untested/unconfirmed whether Yahoo's daily
+    download includes today's date as its last row DURING market hours
+    with a live-updating Close, or only adds today's row after the close.
+    If it's the former and this code just blindly used `.iloc[-1]`
+    everywhere, every "vs previous close" comparison (the daily
+    pre-filter's price check, and this model's core
+    Price_Open_PrevClose_% gap metric) could silently be comparing today
+    against ITSELF instead of against yesterday — a meaningful correctness
+    bug specifically for the Warrior gap-% criterion.
+
+    This function is robust to BOTH possibilities: if the last row's date
+    is today (Eastern time), it steps back one row and returns that as the
+    true prior close; otherwise the last row already IS the settled prior
+    close and is returned as-is. `was_today_row` is returned so callers
+    can aggregate a diagnostic count — see the "Daily-bar freshness check"
+    caption in the page execution section, which reports this directly
+    from your own data on each run rather than assuming an answer.
+    """
+    if daily_df is None or daily_df.empty:
+        return None, False
+    try:
+        idx_dates = pd.DatetimeIndex(daily_df.index).date
+    except Exception:
+        return daily_df.iloc[-1], False
+
+    today_et = datetime.now(ZoneInfo("America/New_York")).date()
+    last_is_today = len(idx_dates) > 0 and idx_dates[-1] == today_et
+
+    if last_is_today and len(daily_df) >= 2:
+        return daily_df.iloc[-2], True
+    return daily_df.iloc[-1], last_is_today
 
 def _load_universe():
     try:
@@ -204,38 +233,23 @@ def _rejection_row(ticker, reason=""):
 
 def _ensure_log_schema(log_path=TOP5_LOG_PATH, expected_columns=TOP5_LOG_COLUMNS):
     """Self-heals the log file if its on-disk header doesn't match the
-    current expected columns. Without this, adding a new column (like
-    Avg_Volume_Last5Bars/Segment_Signal was just added) and then appending
-    to an existing file under its OLD header produces a CSV with a
-    mismatched column count between the header and the newest row(s) —
-    which makes pandas unable to parse the ENTIRE file, not just the new
-    columns, silently breaking the whole log (this is exactly what just
-    happened). Called automatically before every append AND every load,
-    so a schema change repairs itself instead of corrupting history.
-    """
+    current expected columns. See prior version's comments — this
+    prevents a schema change from silently corrupting the whole log."""
     if not os.path.exists(log_path):
-        return  # nothing to repair — log_top5 will create a fresh, correct file
+        return
 
     try:
         existing = pd.read_csv(log_path)
         if list(existing.columns) == list(expected_columns):
-            return  # already correct, nothing to do
+            return
     except Exception:
-        # File has inconsistent column counts across rows (the broken
-        # state). Recover whatever rows DO parse rather than losing all
-        # history — this typically means only the most recent row(s)
-        # written right at the moment of a schema change are dropped.
         try:
             existing = pd.read_csv(log_path, on_bad_lines="skip")
         except TypeError:
-            # Older pandas without on_bad_lines support.
             existing = pd.read_csv(log_path, error_bad_lines=False, warn_bad_lines=False)
         except Exception:
-            return  # truly unreadable; leave it alone rather than risk deleting data
+            return
 
-    # Add any new columns (filled with NaN for old rows that predate
-    # them), drop any that no longer exist, and rewrite with a clean,
-    # consistent header so every row — old and new — lines up.
     for col in expected_columns:
         if col not in existing.columns:
             existing[col] = np.nan
@@ -244,11 +258,8 @@ def _ensure_log_schema(log_path=TOP5_LOG_PATH, expected_columns=TOP5_LOG_COLUMNS
 
 
 def log_top5(top_df, log_path=TOP5_LOG_PATH, top_n=5):
-    """Append the current run's top-N rows from top_df (in whatever order
-    top_df is already sorted — as of this version, callers pass the
-    Avg_Volume_Last5Bars-sorted table, so this logs top-by-volume, not
-    top-by-price-move) to a persistent CSV log, tagged with the run's
-    Eastern-time timestamp."""
+    """Append the current run's top-N rows from top_df to a persistent CSV
+    log, tagged with the run's Eastern-time timestamp."""
     if top_df is None or top_df.empty:
         return 0
 
@@ -261,13 +272,15 @@ def log_top5(top_df, log_path=TOP5_LOG_PATH, top_n=5):
         "Run_Timestamp_ET": run_ts,
         "Ticker": top["Ticker"].values,
         "Close": top["Close"].values,
-        "Price_Increase_%_5Bars": top["Price_Increase_%_5Bars"].values,
+        "Volume_Day_vs_50d": top.get("Volume_Day_vs_50d", pd.Series([np.nan] * len(top))).values,
+        "Price_Open_PrevClose_%": top.get("Price_Open_PrevClose_%", pd.Series([np.nan] * len(top))).values,
+        "Price_Increase_%_5Bars": top.get("Price_Increase_%_5Bars", pd.Series([np.nan] * len(top))).values,
         "Avg_Volume_Last5Bars": top.get("Avg_Volume_Last5Bars", pd.Series([np.nan] * len(top))).values,
         "Segment_Signal": top.get("Segment_Signal", pd.Series(["N/A"] * len(top))).values,
-        "Status": top["Status"].values,
+        "Status": top.get("Status", pd.Series(["N/A"] * len(top))).values,
         "Development_Signal": top.get("EMA_Aligned", pd.Series([np.nan] * len(top))).values,
-        "Latest_Real_Day": top["Latest_Real_Day"].values,
-        "Stale_Bars_Last5": top["Stale_Bars_Last5"].values,
+        "Latest_Real_Day": top.get("Latest_Real_Day", pd.Series(["N/A"] * len(top))).values,
+        "Stale_Bars_Last5": top.get("Stale_Bars_Last5", pd.Series([np.nan] * len(top))).values,
     })
 
     file_exists = os.path.exists(log_path)
@@ -342,17 +355,27 @@ def fetch_intraday_batch(tickers_tuple, max_workers=INTRADAY_MAX_WORKERS):
 
 
 def daily_prefilter(tickers, daily_batch, min_price, max_price):
-    """Shrink the universe by daily history depth AND an exact daily-close
-    price check (yesterday's close, no buffer). See prior version's
-    comments for the known trade-off: a ticker that gapped dramatically
-    from outside this range won't be pre-filtered in."""
+    """Shrink the universe by daily history depth AND a price check.
+
+    FIX: the price check now uses _prior_close_row() instead of a blind
+    `.iloc[-1]` — see that function's docstring for why. Also now counts
+    how many tickers' daily batch has today's date as the last row, so you
+    can see directly (via the caption in page execution) whether Yahoo's
+    daily data updates live during market hours in your environment,
+    rather than that being an unconfirmed assumption.
+
+    Returns (candidates: list[str], prefilter_rejects: list[dict],
+    n_today_rows: int, n_checked: int).
+    """
     candidates = []
     prefilter_rejects = []
+    n_today_rows = 0
+    n_checked = 0
 
     if daily_batch.empty:
         for t in tickers:
             prefilter_rejects.append(_rejection_row(t, "No daily data"))
-        return candidates, prefilter_rejects
+        return candidates, prefilter_rejects, n_today_rows, n_checked
 
     for ticker in tickers:
         daily = _flatten_columns(_extract_ticker_slice(daily_batch, ticker))
@@ -368,7 +391,11 @@ def daily_prefilter(tickers, daily_batch, min_price, max_price):
             continue
 
         try:
-            last_close = float(daily["Close"].iloc[-1])
+            prior_row, was_today = _prior_close_row(daily)
+            n_checked += 1
+            if was_today:
+                n_today_rows += 1
+            last_close = float(prior_row["Close"])
             if last_close < min_price or last_close > max_price:
                 prefilter_rejects.append(_rejection_row(ticker, "Daily price outside range"))
                 continue
@@ -378,7 +405,7 @@ def daily_prefilter(tickers, daily_batch, min_price, max_price):
 
         candidates.append(ticker)
 
-    return candidates, prefilter_rejects
+    return candidates, prefilter_rejects, n_today_rows, n_checked
 
 
 # ==============================================================================
@@ -415,17 +442,21 @@ def session_phase(ts):
     return "Afternoon"
 
 # ==============================================================================
-# PRICE ACCELERATION ENGINE (Penny Model V6)
+# PRICE ACCELERATION ENGINE
 #
 # GATING conditions (what can reject a ticker): regression slope and
-# consistency of the last 5 bars ONLY. EMA9/EMA20 are NO LONGER a gate —
-# see the "EMA_Aligned" informational column below. This was a deliberate
-# change after confirming a real case (GLND, 2026-09-24): price kept
-# climbing on heavy volume for 15+ more minutes and another ~25% after the
-# old EMA-gated version dropped it, apparently due to a single pullback
-# bar breaking the EMA20 slope / consistency conditions temporarily.
+# consistency of the last 5 bars ONLY. EMA9/EMA20 are informational, not
+# gating. The Warrior-specific metrics (gap %, relative volume) are
+# computed and shown but NOT yet gated — see conversation: still being
+# calibrated by manual inspection before turning into hard filters.
 # ==============================================================================
-def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_price, max_stale_bars_last5=2):
+def price_acceleration_engine(
+    tickers, daily_batch, intra_batch, min_price, max_price,
+    max_stale_bars_last5=2,
+    min_reg_slope_pct=MIN_REG_SLOPE_PCT,   # FIX: explicit parameter now,
+                                            # not a bare global read from
+                                            # inside the function.
+):
     rows = []
     rejects = []
     MAX_STALE_BARS_LAST5 = max_stale_bars_last5
@@ -520,9 +551,7 @@ def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_
             avg_vol = float(np.mean(vol[-20:])) if len(vol) >= 20 else float(np.mean(vol))
             r["Avg_Volume_20d"] = round(avg_vol, 0)
 
-        # --- Stale bar check (still gates — thin/no-trade data is a data-
-        # quality issue, not a trend-shape issue, so this stays separate
-        # from the price-acceleration logic below) -----------------------
+        # --- Stale bar check ------------------------------------------------
         last5_index = close_series_clean.tail(5).index
         bar_vol_last5 = pd.to_numeric(intra["Volume"], errors="coerce").reindex(last5_index).fillna(0.0)
         stale_bars_last5 = int((bar_vol_last5 <= 0).sum())
@@ -545,8 +574,8 @@ def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_
         down_moves = np.sum(diffs < 0)
         consistency_score = up_moves / 4.0 if up_moves >= down_moves else down_moves / 4.0
 
-        if reg_slope_pct < MIN_REG_SLOPE_PCT:
-            r["Reason"] = f"Slope too weak ({reg_slope_pct:.5g}, need {MIN_REG_SLOPE_PCT:.5g})"
+        if reg_slope_pct < min_reg_slope_pct:
+            r["Reason"] = f"Slope too weak ({reg_slope_pct:.5g}, need {min_reg_slope_pct:.5g})"
             rejects.append(r)
             continue
 
@@ -555,11 +584,7 @@ def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_
             rejects.append(r)
             continue
 
-        # --- EMA9/EMA20 — INFORMATIONAL ONLY, does not gate qualification.
-        # Computed so you can directly compare "accelerating" tickers that
-        # ARE EMA-aligned vs ones that AREN'T (like GLND was, mid-pullback)
-        # — exactly the comparison needed to decide whether EMA carries
-        # any real signal on top of price acceleration, or none. ----------
+        # --- EMA9/EMA20 — INFORMATIONAL ONLY --------------------------------
         ema9_series = intra["Close"].ewm(span=9, adjust=False).mean()
         ema20_series = intra["Close"].ewm(span=20, adjust=False).mean()
         ema9_last5 = ema9_series.tail(5).values.astype(float)
@@ -577,20 +602,6 @@ def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_
         bar_vol_values = bar_vol_last5.values.astype(float)
 
         # --- SEGMENT SIGNAL: ignition vs already-run (first cut) ----------
-        # Based on two patterns confirmed against real tape data on
-        # 2026-09-25 (FFAI, BENF): the single highest-volume bar in the
-        # 5-bar window tends to mark the local price PEAK, with a pullback
-        # on the very next bar even on continued heavy volume. Meanwhile,
-        # a bar-over-bar rising volume sequence into the current bar (not
-        # yet the peak) tends to precede continued upside.
-        #
-        # This is a FIRST-CUT HYPOTHESIS from a small number of confirmed
-        # examples, not a validated rule — treat it the same way as every
-        # other informational tag in this model (Stale_Bars_Last5,
-        # EMA_Aligned before it): observe it against more sessions before
-        # trusting it to drive entry/exit decisions. It's explicitly NOT a
-        # filter — no ticker is excluded based on this, exactly per your
-        # request to keep observing rather than filter on volume level.
         is_peak_bar5 = bool(bar_vol_values[-1] >= np.max(bar_vol_values))
         is_building = bool(bar_vol_values[2] < bar_vol_values[3] < bar_vol_values[4])
         if is_peak_bar5:
@@ -600,10 +611,58 @@ def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_
         else:
             segment_signal = "🟡 Mixed (no clear rising or peak pattern)"
 
+        # --- WARRIOR-SPECIFIC METRICS ---------------------------------------
+        # 1) 50-day average volume
+        vol_series = pd.to_numeric(daily["Volume"], errors="coerce").dropna()
+        if len(vol_series) >= 50:
+            volume_avg_50d = float(np.mean(vol_series[-50:]))
+        else:
+            volume_avg_50d = float(np.mean(vol_series)) if len(vol_series) > 0 else np.nan
+
+        # 2) Intraday accumulated volume (cumulative so far today — see
+        # conversation: NOT time-of-day-adjusted, so this ratio naturally
+        # grows across the session and isn't directly comparable at 9:45
+        # AM vs 3 PM. Confirmed acceptable for this model's use case,
+        # since the strategy expects waves at unpredictable times
+        # throughout the day, not only in the early minutes.)
+        volume_day = float(np.sum(pd.to_numeric(intra["Volume"], errors="coerce").fillna(0)))
+
+        # 3) Ratio: intraday volume vs 50-day average
+        volume_day_vs_50d = volume_day / volume_avg_50d if volume_avg_50d and volume_avg_50d > 0 else np.nan
+
+        # 4) Intraday open vs previous SETTLED daily close.
+        # FIX: uses _prior_close_row() instead of blind `.iloc[-1]` — see
+        # that function's docstring. Without this, if Yahoo's daily bar
+        # for "today" updates live during market hours, this could have
+        # silently compared today's open against today's still-forming
+        # price instead of against yesterday's actual close.
+        try:
+            prior_row, _ = _prior_close_row(daily)
+            prev_close = float(prior_row["Close"])
+            intraday_open = float(intra["Open"].iloc[0])
+            price_open_prevclose = ((intraday_open - prev_close) / prev_close) * 100 if prev_close > 0 else np.nan
+        except Exception:
+            price_open_prevclose = np.nan
+
         rows.append({
             "Ticker": ticker,
             "Close": round(price, 2),
+            "Price_Open_PrevClose_%": round(price_open_prevclose, 3) if pd.notna(price_open_prevclose) else np.nan,
+            "Volume_Day_vs_50d": round(volume_day_vs_50d, 3) if pd.notna(volume_day_vs_50d) else np.nan,
+            "Price_Increase_%_5Bars": round(pct, 3),
+            "Avg_Volume_Last5Bars": round(float(np.mean(bar_vol_values)), 1),
             "Avg_Volume_20d": r["Avg_Volume_20d"],
+            "Volume_Day": round(volume_day, 1),
+            "Volume_Avg_50d": round(volume_avg_50d, 1) if pd.notna(volume_avg_50d) else np.nan,
+            "Segment_Signal": segment_signal,
+            "Regression_Slope_Pct": round(reg_slope_pct, 5),
+            "Consistency": round(consistency_score, 2),
+            "EMA_Aligned": ema_aligned,
+            "Bar5_EMA9": round(ema9_now, 4),
+            "Bar5_EMA20": round(ema20_now, 4),
+            "Status": "PRICE",
+            "Latest_Real_Day": str(latest_day),
+            "Stale_Bars_Last5": stale_bars_last5,
             "Bar1_Close": round(last5[0], 4),
             "Bar2_Close": round(last5[1], 4),
             "Bar3_Close": round(last5[2], 4),
@@ -614,27 +673,17 @@ def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_
             "Bar3_Volume": int(bar_vol_values[2]),
             "Bar4_Volume": int(bar_vol_values[3]),
             "Bar5_Volume": int(bar_vol_values[4]),
-            "Avg_Volume_Last5Bars": round(float(np.mean(bar_vol_values)), 1),
-            "Segment_Signal": segment_signal,
-            "Price_Increase_%_5Bars": round(pct, 3),
-            "Regression_Slope_Pct": round(reg_slope_pct, 5),
-            "Consistency": round(consistency_score, 2),
-            "EMA_Aligned": ema_aligned,
-            "Bar5_EMA9": round(ema9_now, 4),
-            "Bar5_EMA20": round(ema20_now, 4),
-            "Status": "PRICE",
-            "Latest_Real_Day": str(latest_day),
-            "Stale_Bars_Last5": stale_bars_last5,
         })
 
     ranking = pd.DataFrame(rows)
-    rejects_df = pd.DataFrame(rejects)
 
     if not ranking.empty:
         ranking = ranking.sort_values(
-            ["Price_Increase_%_5Bars", "Bar5_Close", "Ticker"],
-            ascending=[False, False, True]
+            ["Volume_Day_vs_50d", "Price_Open_PrevClose_%"],
+            ascending=[False, False]
         ).reset_index(drop=True)
+
+    rejects_df = pd.DataFrame(rejects)
 
     return ranking, rejects_df
 
@@ -666,8 +715,17 @@ else:
     st.caption("No movers list loaded (optional). Add `data/movers_list.py` with a `load_movers()` function to enable mover tagging.")
 
 st.write("### 🔍 Price Boundaries Filter")
-min_price = st.number_input("Minimum Price ($)", min_value=0.0, value=1.00, step=0.25)
-max_price = st.number_input("Maximum Price ($)", min_value=0.0, value=5.00, step=0.25)
+min_price = st.number_input("Minimum Price ($)", min_value=0.0, value=2.00, step=0.25)
+max_price = st.number_input("Maximum Price ($)", min_value=0.0, value=20.00, step=0.25)
+
+min_reg_slope_pct = st.number_input(
+    "Minimum Regression Slope (% per bar)",
+    min_value=0.0,
+    value=0.002,
+    step=0.001,
+    format="%.3f",
+    help="Percentage slope per bar. Example: 0.005 = 0.5% per bar (≈2.5% over 5 bars)."
+)
 
 max_stale_bars_last5 = st.slider(
     "Max no-trade bars allowed in last 5",
@@ -704,7 +762,9 @@ if run_clicked:
     daily_batch = fetch_daily_batch(tuple(tickers))
     t1 = time.time()
 
-    candidates, prefilter_rejects = daily_prefilter(tickers, daily_batch, min_price, max_price)
+    candidates, prefilter_rejects, n_today_rows, n_checked = daily_prefilter(
+        tickers, daily_batch, min_price, max_price
+    )
     t2 = time.time()
 
     if force_refresh:
@@ -715,6 +775,7 @@ if run_clicked:
     ranking, engine_rejects = price_acceleration_engine(
         candidates, daily_batch, intra_batch, min_price, max_price,
         max_stale_bars_last5=max_stale_bars_last5,
+        min_reg_slope_pct=min_reg_slope_pct,
     )
     t4 = time.time()
 
@@ -728,6 +789,8 @@ if run_clicked:
         "n_universe": len(tickers),
         "timings": (t0, t1, t2, t3, t4),
         "run_at_et": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "n_today_rows": n_today_rows,
+        "n_checked": n_checked,
     }
 
 results = st.session_state.get("model_results")
@@ -756,6 +819,29 @@ else:
             "data (up to 2 min old), not a fresh pull. If you need up-to-the-"
             "second prices, check 'Force fresh intraday data' above and re-run."
         )
+
+    # --- Daily-bar freshness diagnostic (answers open question #4 directly
+    # from YOUR data, rather than assuming an answer) ----------------------
+    if _is_market_hours and results.get("n_checked", 0) > 0:
+        n_today_rows = results["n_today_rows"]
+        n_checked = results["n_checked"]
+        pct_today = 100 * n_today_rows / n_checked if n_checked else 0
+        if n_today_rows > 0:
+            st.caption(
+                f"ℹ️ Daily-bar freshness check: {n_today_rows}/{n_checked} tickers "
+                f"({pct_today:.0f}%) have TODAY's date as the last row in their daily "
+                f"batch — meaning Yahoo's daily data appears to update live during "
+                f"market hours in your environment. The code already accounts for "
+                f"this (Price_Open_PrevClose_% and the daily price pre-filter use the "
+                f"prior settled close, not this live row)."
+            )
+        else:
+            st.caption(
+                f"ℹ️ Daily-bar freshness check: 0/{n_checked} tickers have today's date "
+                f"as the last daily row — Yahoo's daily data appears to only settle "
+                f"after the close in your environment, so `.iloc[-1]` alone would "
+                f"have been correct anyway. Good to have confirmed either way."
+            )
 
     movers_set = set(movers)
     if not ranking.empty:
@@ -794,26 +880,21 @@ if results is not None:
         st.warning("No tickers qualified.")
     else:
         st.write("### 📊 Price Acceleration (EMA shown as info only, not a gate)")
-        # FIX: engine now labels qualifying rows "PRICE", not "EMA" — the
-        # display filter must match, or this table silently shows nothing
-        # even when the engine found real qualifiers.
         qualified = ranking[ranking["Status"] == "PRICE"]
         if qualified.empty:
             st.info("No tickers qualified this run.")
         else:
-            qualified_display = qualified.sort_values(
-                "Avg_Volume_Last5Bars", ascending=False
-            ).reset_index(drop=True)
+            qualified_display = qualified.reset_index(drop=True)
             st.dataframe(qualified_display, use_container_width=True)
-            # CHANGED: log the volume-sorted top 5 (qualified_display), not
-            # a separately price-sorted slice. Previously these used two
-            # different rankings, which meant a ticker like UWMC — clearly
-            # #1 by volume, but not top-5 by price move — never appeared in
-            # the log at all, even though it was the exact catch you were
-            # using as evidence the model works. Now "logged top 5" always
-            # matches what's actually shown in the table above.
+            st.caption(
+                "Table sorted by Volume_Day_vs_50d then Price_Open_PrevClose_% (descending). "
+                "Warrior gap-% and volume-ratio criteria are NOT yet hard filters — every "
+                "PRICE-qualified ticker is shown regardless of how well it meets them; sort "
+                "order surfaces the strongest matches at the top for manual review."
+            )
+
             n_logged = log_top5(qualified_display)
-            st.caption(f"📝 Logged top {n_logged} (by Avg_Volume_Last5Bars, matching the table above) to `{os.path.basename(TOP5_LOG_PATH)}` at this run's timestamp.")
+            st.caption(f"📝 Logged top {n_logged} (by Volume_Day_vs_50d, matching the table above) to `{os.path.basename(TOP5_LOG_PATH)}` at this run's timestamp.")
 
 # ==============================================================================
 # TOP-5 RUNNING LOG

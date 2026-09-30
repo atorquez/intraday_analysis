@@ -1,41 +1,91 @@
-Run_Timestamp_ET,Ticker,Close,Price_Increase_%_5Bars,Status,Development_Signal,Latest_Real_Day,Stale_Bars_Last5
-2026-09-24 19:41:53 EDT,XAIR,3.17,7.823,PRICE,True,2026-09-24,0
-2026-09-24 19:41:53 EDT,SHPH,3.98,7.33,PRICE,True,2026-09-24,0
-2026-09-24 19:41:53 EDT,UK,2.1,5.808,PRICE,True,2026-09-24,0
-2026-09-24 19:41:53 EDT,SONM,3.95,5.615,PRICE,True,2026-09-24,0
-2026-09-24 19:41:53 EDT,BENF,1.45,4.618,PRICE,True,2026-09-24,0
-2026-09-24 19:45:31 EDT,XAIR,3.17,7.823,PRICE,True,2026-09-24,0
-2026-09-24 19:45:31 EDT,SHPH,3.98,7.33,PRICE,True,2026-09-24,0
-2026-09-24 19:45:31 EDT,UK,2.1,5.808,PRICE,True,2026-09-24,0
-2026-09-24 19:45:31 EDT,SONM,3.95,5.615,PRICE,True,2026-09-24,0
-2026-09-24 19:45:31 EDT,BENF,1.45,4.618,PRICE,True,2026-09-24,0
-2026-09-24 19:52:15 EDT,UWMC,1.23,2.51,PRICE,True,2026-09-24,0
-2026-09-24 19:52:15 EDT,HTZ,1.76,2.023,PRICE,True,2026-09-24,0
-2026-09-24 19:52:15 EDT,PFSA,3.03,1.508,PRICE,True,2026-09-24,0
-2026-09-24 19:52:15 EDT,BENF,1.45,4.618,PRICE,True,2026-09-24,0
-2026-09-24 19:52:15 EDT,XAIR,3.17,7.823,PRICE,True,2026-09-24,0
-2026-09-24 19:53:35 EDT,UWMC,1.23,2.51,PRICE,True,2026-09-24,0
-2026-09-24 19:53:35 EDT,HTZ,1.76,2.023,PRICE,True,2026-09-24,0
-2026-09-24 19:53:35 EDT,PFSA,3.03,1.508,PRICE,True,2026-09-24,0
-2026-09-24 19:53:35 EDT,BENF,1.45,4.618,PRICE,True,2026-09-24,0
-2026-09-24 19:53:35 EDT,XAIR,3.17,7.823,PRICE,True,2026-09-24,0
-2026-09-24 20:15:02 EDT,UWMC,1.23,2.51,PRICE,True,2026-09-24,0
-2026-09-24 20:15:02 EDT,HTZ,1.76,2.023,PRICE,True,2026-09-24,0
-2026-09-24 20:15:02 EDT,PFSA,3.03,1.508,PRICE,True,2026-09-24,0
-2026-09-24 20:15:02 EDT,BENF,1.45,4.618,PRICE,True,2026-09-24,0
-2026-09-24 20:15:02 EDT,XAIR,3.17,7.823,PRICE,True,2026-09-24,0
-2026-09-24 20:15:08 EDT,UWMC,1.23,2.51,PRICE,True,2026-09-24,0
-2026-09-24 20:15:08 EDT,HTZ,1.76,2.023,PRICE,True,2026-09-24,0
-2026-09-24 20:15:08 EDT,PFSA,3.03,1.508,PRICE,True,2026-09-24,0
-2026-09-24 20:15:08 EDT,BENF,1.45,4.618,PRICE,True,2026-09-24,0
-2026-09-24 20:15:08 EDT,XAIR,3.17,7.823,PRICE,True,2026-09-24,0
-2026-09-24 20:18:01 EDT,PFSA,3.03,1.508,PRICE,True,2026-09-24,0
-2026-09-24 20:18:01 EDT,XAIR,3.17,7.823,PRICE,True,2026-09-24,0
-2026-09-24 20:18:01 EDT,SKYQ,2.91,1.923,PRICE,True,2026-09-24,0
-2026-09-24 20:18:01 EDT,YDES,4.75,3.259,PRICE,True,2026-09-24,0
-2026-09-24 20:18:01 EDT,EVCM,8.45,2.486,PRICE,True,2026-09-24,0
-2026-09-24 20:18:43 EDT,PFSA,3.03,1.508,PRICE,True,2026-09-24,0
-2026-09-24 20:18:43 EDT,XAIR,3.17,7.823,PRICE,True,2026-09-24,0
-2026-09-24 20:18:43 EDT,SKYQ,2.91,1.923,PRICE,True,2026-09-24,0
-2026-09-24 20:18:43 EDT,YDES,4.75,3.259,PRICE,True,2026-09-24,0
-2026-09-24 20:18:43 EDT,EVCM,8.45,2.486,PRICE,True,2026-09-24,0
+Run_Timestamp_ET,Ticker,Close,Volume_Day_vs_50d,Price_Open_PrevClose_%,Price_Increase_%_5Bars,Avg_Volume_Last5Bars,Segment_Signal,Status,Development_Signal,Latest_Real_Day,Stale_Bars_Last5
+2026-09-30 10:03:58 EDT,RENX,2.2,,,1.334,1097.0,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:03:58 EDT,SSTI,8.6,,,1.296,5447.6,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:03:58 EDT,OKUR,2.65,,,2.713,2093.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:03:58 EDT,STTK,7.29,,,1.178,10263.6,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:03:58 EDT,BXBL,3.28,,,2.5,8074.6,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:04:21 EDT,RGTI,16.44,,,0.951,145648.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:04:21 EDT,QBTS,17.13,,,1.122,118704.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:04:21 EDT,BBAI,2.77,,,1.491,79424.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:04:21 EDT,QUBT,8.79,,,1.15,71054.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:04:21 EDT,STUB,5.53,,,2.884,65714.2,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:05:16 EDT,LCID,4.16,,,2.209,48469.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:05:16 EDT,ABOS,2.2,,,3.774,30609.0,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:05:16 EDT,FFAI,1.27,,,2.419,13404.4,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:05:16 EDT,PMVP,1.58,,,2.259,11439.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:05:16 EDT,GRWG,1.58,,,2.597,8767.8,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:07:53 EDT,CNVS,2.06,,,3.778,6230.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:07:53 EDT,ABOS,2.2,,,3.774,30609.0,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:07:53 EDT,CEPL,4.57,,,3.628,3116.2,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:07:53 EDT,BENF,1.39,,,3.237,2821.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:07:53 EDT,MEDS,3.36,,,3.212,1284.6,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:09:38 EDT,RENX,2.18,,,1.012,960.4,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:09:38 EDT,ABOS,2.26,,,3.678,47977.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:09:38 EDT,CTNM,13.13,,,2.739,1728.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:09:38 EDT,OPTX,8.13,,,0.993,3011.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:09:38 EDT,GLOO,4.32,,,0.699,1179.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:10:52 EDT,RENX,2.18,,,1.012,960.4,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:10:52 EDT,ABOS,2.26,,,3.678,47977.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:10:52 EDT,CTNM,13.13,,,2.739,1728.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:10:52 EDT,OPTX,8.13,,,0.993,3011.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:10:52 EDT,GLOO,4.32,,,0.699,1179.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:14:15 EDT,XRPN,14.69,,,1.802,1058.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:14:15 EDT,CAPR,9.68,,,0.834,51257.8,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:14:15 EDT,RENX,2.23,,,2.288,802.6,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:14:15 EDT,ABOS,2.27,,,2.721,2586.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:14:15 EDT,STTK,7.39,,,1.094,1228.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:18:09 EDT,ABOS,2.3,,,1.545,3834.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:18:09 EDT,BNAI,6.41,,,1.024,762.8,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,0
+2026-09-30 10:18:09 EDT,DNA,12.6,,,1.205,5226.6,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:18:09 EDT,SMMT,17.0,,,0.622,27599.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:18:09 EDT,BKYI,3.05,,,5.485,24720.6,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:19:43 EDT,ABOS,2.3,,,1.545,3834.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:19:43 EDT,BNAI,6.41,,,1.024,762.8,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,0
+2026-09-30 10:19:43 EDT,DNA,12.6,,,1.205,5226.6,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:19:43 EDT,SMMT,17.0,,,0.622,27599.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:19:43 EDT,BKYI,3.05,,,5.485,24720.6,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:22:22 EDT,QTTB,9.48,,,0.637,4290.2,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:22:22 EDT,ABOS,2.32,,,1.31,1516.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:22:22 EDT,RXRX,4.26,,,1.988,341702.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:22:22 EDT,COUR,5.03,,,0.802,28076.6,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:22:22 EDT,FTCI,2.3,,,0.877,2262.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:30:01 EDT,SSTI,8.67,,,1.167,1000.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:30:01 EDT,DMRC,5.19,,,0.973,2082.4,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:30:01 EDT,OKUR,2.56,,,1.186,9155.2,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:30:01 EDT,BOLD,2.5,,,1.215,4907.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:30:01 EDT,VYX,6.95,,,1.251,52937.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:31:05 EDT,SSTI,8.67,,,1.167,1000.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:31:05 EDT,DMRC,5.19,,,0.973,2082.4,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:31:05 EDT,OKUR,2.56,,,1.186,9155.2,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:31:05 EDT,BOLD,2.5,,,1.215,4907.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:31:05 EDT,VYX,6.95,,,1.251,52937.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:31:34 EDT,PATH,12.88,,,1.02,87530.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:31:34 EDT,GLND,4.86,,,1.206,58221.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:31:34 EDT,VYX,6.95,,,1.251,52937.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:31:34 EDT,SLS,12.04,,,1.304,20514.6,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:31:34 EDT,OKUR,2.56,,,1.186,9155.2,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:33:06 EDT,BENF,1.45,,,2.837,7994.2,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,2
+2026-09-30 10:33:06 EDT,PEPG,2.48,,,2.053,7114.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:33:06 EDT,MRLN,1.94,,,2.105,4225.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:33:06 EDT,FEAM,3.34,,,3.406,2169.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:33:06 EDT,CJMB,2.44,,,2.516,1256.2,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,2
+2026-09-30 10:33:34 EDT,FEAM,3.34,,,3.406,2169.0,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:33:34 EDT,BENF,1.45,,,2.837,7994.2,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,2
+2026-09-30 10:33:34 EDT,CJMB,2.44,,,2.516,1256.2,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,2
+2026-09-30 10:33:34 EDT,MRLN,1.94,,,2.105,4225.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:33:34 EDT,PEPG,2.48,,,2.053,7114.8,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:35:29 EDT,PYXS,2.18,2.288,-18.103,2.825,78926.6,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:35:29 EDT,OPTX,8.25,0.752,6.343,1.852,2171.2,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:35:29 EDT,SMMT,16.89,0.48,1.342,0.912,33754.4,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,0
+2026-09-30 10:35:29 EDT,TZOO,5.59,0.459,0.909,1.268,5118.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,2
+2026-09-30 10:35:29 EDT,WW,16.31,0.348,-2.164,0.803,1973.4,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:37:06 EDT,PYXS,2.18,2.288,-18.103,2.825,78926.6,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:37:06 EDT,OPTX,8.25,0.752,6.343,1.852,2171.2,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:37:06 EDT,SMMT,16.89,0.48,1.342,0.912,33754.4,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,0
+2026-09-30 10:37:06 EDT,TZOO,5.59,0.459,0.909,1.268,5118.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,2
+2026-09-30 10:37:06 EDT,WW,16.31,0.348,-2.164,0.803,1973.4,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:39:26 EDT,OKUR,2.61,1.063,1.154,1.953,1346.6,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:39:26 EDT,GLOO,4.28,0.47,-1.342,0.942,2834.2,🟡 Mixed (no clear rising or peak pattern),PRICE,False,2026-09-30,1
+2026-09-30 10:39:26 EDT,TZOO,5.59,0.459,0.909,1.268,5118.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,2
+2026-09-30 10:39:26 EDT,SPTX,19.22,0.406,0.856,1.105,5112.4,🟡 Mixed (no clear rising or peak pattern),PRICE,True,2026-09-30,1
+2026-09-30 10:39:26 EDT,BKYI,3.05,0.379,-8.654,3.473,3552.6,🔴 Peak Bar (biggest volume in window — historically often marks a local top),PRICE,True,2026-09-30,0

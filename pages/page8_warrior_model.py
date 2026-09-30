@@ -1,5 +1,5 @@
 # ==============================================================================
-# 📈 PENNY MODEL — Clean & Patched Version (Standalone Page 4)
+# 📈 WARRIOR MODEL — Clean & Patched Version (Standalone Page 4)
 # ==============================================================================
 import streamlit as st
 import numpy as np
@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ==============================================================================
 st.set_page_config(layout="wide", page_title="Penny Model")
 st.caption("Version: V6 — Price-acceleration engine (EMA no longer gates, kept as informational tag)")
-st.title("📈 Penny Model")
+st.title("📈 Price Acceleration Model")
 
 # ==============================================================================
 # MODEL PARAMETERS
@@ -73,10 +73,17 @@ INTRADAY_CACHE_TTL_SECONDS = 120        # 2 minutes — must stay fresh for live
 # Where the top-5-per-run log persists across separate script runs.
 import os
 TOP5_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "top5_log.csv")
+##TOP5_LOG_COLUMNS = [
+#    "Run_Timestamp_ET", "Ticker", "Close", "Price_Increase_%_5Bars",
+#    "Avg_Volume_Last5Bars", "Segment_Signal",
+#    "Status", "Development_Signal", "Latest_Real_Day", "Stale_Bars_Last5",
+#]
 TOP5_LOG_COLUMNS = [
-    "Run_Timestamp_ET", "Ticker", "Close", "Price_Increase_%_5Bars",
-    "Avg_Volume_Last5Bars", "Segment_Signal",
-    "Status", "Development_Signal", "Latest_Real_Day", "Stale_Bars_Last5",
+    "Run_Timestamp_ET", "Ticker", "Close",
+    "Volume_Day_vs_50d", "Price_Open_PrevClose_%",
+    "Price_Increase_%_5Bars", "Avg_Volume_Last5Bars",
+    "Segment_Signal", "Status", "Development_Signal",
+    "Latest_Real_Day", "Stale_Bars_Last5",
 ]
 
 # ==============================================================================
@@ -257,18 +264,34 @@ def log_top5(top_df, log_path=TOP5_LOG_PATH, top_n=5):
     run_ts = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S %Z")
 
     top = top_df.head(top_n).copy()
+    #entry = pd.DataFrame({
+    #    "Run_Timestamp_ET": run_ts,
+    #    "Ticker": top["Ticker"].values,
+    #    "Close": top["Close"].values,
+    #    "Price_Increase_%_5Bars": top["Price_Increase_%_5Bars"].values,
+    #    "Avg_Volume_Last5Bars": top.get("Avg_Volume_Last5Bars", pd.Series([np.nan] * len(top))).values,
+    #    "Segment_Signal": top.get("Segment_Signal", pd.Series(["N/A"] * len(top))).values,
+    #    "Status": top["Status"].values,
+    #    "Development_Signal": top.get("EMA_Aligned", pd.Series([np.nan] * len(top))).values,
+    #    "Latest_Real_Day": top["Latest_Real_Day"].values,
+    #    "Stale_Bars_Last5": top["Stale_Bars_Last5"].values,
+    #})
+
     entry = pd.DataFrame({
         "Run_Timestamp_ET": run_ts,
         "Ticker": top["Ticker"].values,
         "Close": top["Close"].values,
+        "Volume_Day_vs_50d": top["Volume_Day_vs_50d"].values,
+        "Price_Open_PrevClose_%": top["Price_Open_PrevClose_%"].values,
         "Price_Increase_%_5Bars": top["Price_Increase_%_5Bars"].values,
-        "Avg_Volume_Last5Bars": top.get("Avg_Volume_Last5Bars", pd.Series([np.nan] * len(top))).values,
-        "Segment_Signal": top.get("Segment_Signal", pd.Series(["N/A"] * len(top))).values,
+        "Avg_Volume_Last5Bars": top["Avg_Volume_Last5Bars"].values,
+        "Segment_Signal": top["Segment_Signal"].values,
         "Status": top["Status"].values,
-        "Development_Signal": top.get("EMA_Aligned", pd.Series([np.nan] * len(top))).values,
+        "Development_Signal": top["EMA_Aligned"].values,
         "Latest_Real_Day": top["Latest_Real_Day"].values,
         "Stale_Bars_Last5": top["Stale_Bars_Last5"].values,
     })
+
 
     file_exists = os.path.exists(log_path)
     entry.to_csv(log_path, mode="a", header=not file_exists, index=False)
@@ -415,7 +438,7 @@ def session_phase(ts):
     return "Afternoon"
 
 # ==============================================================================
-# PRICE ACCELERATION ENGINE (Penny Model V6)
+# PRICE ACCELERATION ENGINE
 #
 # GATING conditions (what can reject a ticker): regression slope and
 # consistency of the last 5 bars ONLY. EMA9/EMA20 are NO LONGER a gate —
@@ -545,8 +568,10 @@ def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_
         down_moves = np.sum(diffs < 0)
         consistency_score = up_moves / 4.0 if up_moves >= down_moves else down_moves / 4.0
 
-        if reg_slope_pct < MIN_REG_SLOPE_PCT:
-            r["Reason"] = f"Slope too weak ({reg_slope_pct:.5g}, need {MIN_REG_SLOPE_PCT:.5g})"
+        #if reg_slope_pct < MIN_REG_SLOPE_PCT:
+        if reg_slope_pct < min_reg_slope_pct:
+
+            r["Reason"] = f"Slope too weak ({reg_slope_pct:.5g}, need {min_reg_slope_pct:.5g})"
             rejects.append(r)
             continue
 
@@ -600,10 +625,48 @@ def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_
         else:
             segment_signal = "🟡 Mixed (no clear rising or peak pattern)"
 
+        # --- NEW VOLUME METRICS -------------------------------------------------------
+        # 1) 50-day average volume (fallback: use whatever is available)
+        vol_series = pd.to_numeric(daily["Volume"], errors="coerce").dropna()
+
+        if len(vol_series) >= 50:
+            volume_avg_50d = float(np.mean(vol_series[-50:]))
+        else:
+            volume_avg_50d = float(np.mean(vol_series)) if len(vol_series) > 0 else np.nan
+
+        # 2) Intraday accumulated volume
+        volume_day = float(np.sum(pd.to_numeric(intra["Volume"], errors="coerce").fillna(0)))
+
+        # 3) Ratio: intraday volume vs 50-day average
+        volume_day_vs_50d = volume_day / volume_avg_50d if volume_avg_50d and volume_avg_50d > 0 else np.nan
+
+        # 4) Intraday open vs previous daily close
+        try:
+            prev_close = float(daily["Close"].iloc[-1])
+            intraday_open = float(intra["Open"].iloc[0])
+            price_open_prevclose = ((intraday_open - prev_close) / prev_close) * 100 if prev_close > 0 else np.nan
+        except Exception:
+            price_open_prevclose = np.nan
+
         rows.append({
             "Ticker": ticker,
             "Close": round(price, 2),
+            "Price_Open_PrevClose_%": round(price_open_prevclose, 3),
+            "Volume_Day_vs_50d": round(volume_day_vs_50d, 3),
+            "Price_Increase_%_5Bars": round(pct, 3),
+            "Avg_Volume_Last5Bars": round(float(np.mean(bar_vol_values)), 1),
             "Avg_Volume_20d": r["Avg_Volume_20d"],
+            "Volume_Day": round(volume_day, 1),
+            "Volume_Avg_50d": round(volume_avg_50d, 1),
+            "Segment_Signal": segment_signal,
+            "Regression_Slope_Pct": round(reg_slope_pct, 5),
+            "Consistency": round(consistency_score, 2),
+            "EMA_Aligned": ema_aligned,
+            "Bar5_EMA9": round(ema9_now, 4),
+            "Bar5_EMA20": round(ema20_now, 4),
+            "Status": "PRICE",
+            "Latest_Real_Day": str(latest_day),
+            "Stale_Bars_Last5": stale_bars_last5,
             "Bar1_Close": round(last5[0], 4),
             "Bar2_Close": round(last5[1], 4),
             "Bar3_Close": round(last5[2], 4),
@@ -613,28 +676,18 @@ def price_acceleration_engine(tickers, daily_batch, intra_batch, min_price, max_
             "Bar2_Volume": int(bar_vol_values[1]),
             "Bar3_Volume": int(bar_vol_values[2]),
             "Bar4_Volume": int(bar_vol_values[3]),
-            "Bar5_Volume": int(bar_vol_values[4]),
-            "Avg_Volume_Last5Bars": round(float(np.mean(bar_vol_values)), 1),
-            "Segment_Signal": segment_signal,
-            "Price_Increase_%_5Bars": round(pct, 3),
-            "Regression_Slope_Pct": round(reg_slope_pct, 5),
-            "Consistency": round(consistency_score, 2),
-            "EMA_Aligned": ema_aligned,
-            "Bar5_EMA9": round(ema9_now, 4),
-            "Bar5_EMA20": round(ema20_now, 4),
-            "Status": "PRICE",
-            "Latest_Real_Day": str(latest_day),
-            "Stale_Bars_Last5": stale_bars_last5,
+            "Bar5_Volume": int(bar_vol_values[4]),  
         })
 
     ranking = pd.DataFrame(rows)
-    rejects_df = pd.DataFrame(rejects)
 
     if not ranking.empty:
         ranking = ranking.sort_values(
-            ["Price_Increase_%_5Bars", "Bar5_Close", "Ticker"],
-            ascending=[False, False, True]
+            ["Volume_Day_vs_50d", "Price_Open_PrevClose_%"],
+            ascending=[False, False]
         ).reset_index(drop=True)
+
+    rejects_df = pd.DataFrame(rejects)
 
     return ranking, rejects_df
 
@@ -666,8 +719,17 @@ else:
     st.caption("No movers list loaded (optional). Add `data/movers_list.py` with a `load_movers()` function to enable mover tagging.")
 
 st.write("### 🔍 Price Boundaries Filter")
-min_price = st.number_input("Minimum Price ($)", min_value=0.0, value=1.00, step=0.25)
-max_price = st.number_input("Maximum Price ($)", min_value=0.0, value=5.00, step=0.25)
+min_price = st.number_input("Minimum Price ($)", min_value=0.0, value=2.00, step=0.25)
+max_price = st.number_input("Maximum Price ($)", min_value=0.0, value=20.00, step=0.25)
+
+min_reg_slope_pct = st.number_input(
+    "Minimum Regression Slope (% per bar)",
+    min_value=0.0,
+    value=0.002,
+    step=0.001,
+    format="%.3f",
+    help="Percentage slope per bar. Example: 0.005 = 0.5% per bar (≈2.5% over 5 bars)."
+)
 
 max_stale_bars_last5 = st.slider(
     "Max no-trade bars allowed in last 5",
@@ -801,19 +863,11 @@ if results is not None:
         if qualified.empty:
             st.info("No tickers qualified this run.")
         else:
-            qualified_display = qualified.sort_values(
-                "Avg_Volume_Last5Bars", ascending=False
-            ).reset_index(drop=True)
+            qualified_display = qualified.reset_index(drop=True)
             st.dataframe(qualified_display, use_container_width=True)
-            # CHANGED: log the volume-sorted top 5 (qualified_display), not
-            # a separately price-sorted slice. Previously these used two
-            # different rankings, which meant a ticker like UWMC — clearly
-            # #1 by volume, but not top-5 by price move — never appeared in
-            # the log at all, even though it was the exact catch you were
-            # using as evidence the model works. Now "logged top 5" always
-            # matches what's actually shown in the table above.
+
             n_logged = log_top5(qualified_display)
-            st.caption(f"📝 Logged top {n_logged} (by Avg_Volume_Last5Bars, matching the table above) to `{os.path.basename(TOP5_LOG_PATH)}` at this run's timestamp.")
+            st.caption(f"📝 Logged top {n_logged} (by Volume_Day_vs_50d, matching the table above)")
 
 # ==============================================================================
 # TOP-5 RUNNING LOG

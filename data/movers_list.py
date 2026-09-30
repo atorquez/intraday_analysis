@@ -17,12 +17,14 @@
 
 def load_movers():
     return [
-        "GCTK",
-        "APUS",
-        "PFSA",
+        "CNTB",
+        "LGHL",
+        "NCI",
+        "VBIO",
+        "BIYA",
         "WETO",
+        "CAPR",
         "NCPL",
-        "SPHL",
-        "SKYQ",
-        "UXIN"
+        "KIDZ",
+        "NAUT"
             ]
