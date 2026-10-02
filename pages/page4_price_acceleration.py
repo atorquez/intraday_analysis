@@ -1,5 +1,5 @@
 # ==============================================================================
-# 📈 PENNY MODEL — Clean & Patched Version (Standalone Page 4)
+# 📈 PRICE ACCELERATION MODEL — Clean & Patched Version (Standalone Page 4)
 # ==============================================================================
 import streamlit as st
 import numpy as np
@@ -52,7 +52,7 @@ PREFILTER_PRICE_BUFFER_PCT = 0.15  # currently unused
 # derived or validated. Treat this as a first guess to calibrate against
 # your own data, the same way MIN_CONSISTENCY and the old EMA thresholds
 # were tuned.
-MIN_REG_SLOPE_PCT = 0.005   # 0.5% of price per bar
+MIN_REG_SLOPE_PCT = 0.002   # 0.2% of price per bar
 MIN_CONSISTENCY = 0.25      # loosened from the old EMA version's 0.60 —
                             # quite permissive; worth watching whether this
                             # lets through mostly-flat/choppy tickers.
