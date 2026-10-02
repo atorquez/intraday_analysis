@@ -17,14 +17,13 @@
 
 def load_movers():
     return [
-        "CNTB",
-        "LGHL",
-        "NCI",
-        "VBIO",
-        "BIYA",
-        "WETO",
-        "CAPR",
-        "NCPL",
-        "KIDZ",
-        "NAUT"
-            ]
+        "AMOD",
+        "SDEV",
+        "AIXI",
+        "SGRX",
+        "AMIX",
+        "GOW",
+        "SSM",
+        "CYPH",
+        "TNON"
+    ]

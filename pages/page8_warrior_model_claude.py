@@ -443,20 +443,15 @@ def session_phase(ts):
 
 # ==============================================================================
 # PRICE ACCELERATION ENGINE
-#
-# GATING conditions (what can reject a ticker): regression slope and
-# consistency of the last 5 bars ONLY. EMA9/EMA20 are informational, not
-# gating. The Warrior-specific metrics (gap %, relative volume) are
-# computed and shown but NOT yet gated — see conversation: still being
-# calibrated by manual inspection before turning into hard filters.
 # ==============================================================================
 def price_acceleration_engine(
     tickers, daily_batch, intra_batch, min_price, max_price,
     max_stale_bars_last5=2,
-    min_reg_slope_pct=MIN_REG_SLOPE_PCT,   # FIX: explicit parameter now,
-                                            # not a bare global read from
-                                            # inside the function.
+    min_gap_pct=None,
+    min_volume_ratio=None,
+    min_volume_day=None,
 ):
+
     rows = []
     rejects = []
     MAX_STALE_BARS_LAST5 = max_stale_bars_last5
@@ -537,7 +532,9 @@ def price_acceleration_engine(
             rejects.append(r)
             continue
 
-        price = float(close_raw[-1])
+        # Use prior settled daily close (correct Warrior behavior)
+        prior_row, _ = _prior_close_row(daily)
+        price = float(prior_row["Close"])
         r["Price"] = round(price, 2)
 
         if price < min_price or price > max_price:
@@ -561,7 +558,7 @@ def price_acceleration_engine(
             rejects.append(r)
             continue
 
-        # --- PRICE ACCELERATION (the only trend-shape gate) ---------------
+        # --- PRICE ACCELERATION --------------------------------------------
         last5 = close_raw[-5:]
         pct = (last5[-1] - last5[0]) / last5[0] * 100 if last5[0] > 0 else 0
 
@@ -574,17 +571,12 @@ def price_acceleration_engine(
         down_moves = np.sum(diffs < 0)
         consistency_score = up_moves / 4.0 if up_moves >= down_moves else down_moves / 4.0
 
-        if reg_slope_pct < min_reg_slope_pct:
-            r["Reason"] = f"Slope too weak ({reg_slope_pct:.5g}, need {min_reg_slope_pct:.5g})"
-            rejects.append(r)
-            continue
-
         if consistency_score < MIN_CONSISTENCY:
             r["Reason"] = f"Low consistency ({consistency_score:.2f}, need {MIN_CONSISTENCY:.2f})"
             rejects.append(r)
             continue
 
-        # --- EMA9/EMA20 — INFORMATIONAL ONLY --------------------------------
+        # --- EMA9/EMA20 (informational only) -------------------------------
         ema9_series = intra["Close"].ewm(span=9, adjust=False).mean()
         ema20_series = intra["Close"].ewm(span=20, adjust=False).mean()
         ema9_last5 = ema9_series.tail(5).values.astype(float)
@@ -601,41 +593,26 @@ def price_acceleration_engine(
 
         bar_vol_values = bar_vol_last5.values.astype(float)
 
-        # --- SEGMENT SIGNAL: ignition vs already-run (first cut) ----------
+        # --- SEGMENT SIGNAL -------------------------------------------------
         is_peak_bar5 = bool(bar_vol_values[-1] >= np.max(bar_vol_values))
         is_building = bool(bar_vol_values[2] < bar_vol_values[3] < bar_vol_values[4])
         if is_peak_bar5:
-            segment_signal = "🔴 Peak Bar (biggest volume in window — historically often marks a local top)"
+            segment_signal = "🔴 Peak Bar"
         elif is_building:
-            segment_signal = "🟢 Ignition (volume rising bar-over-bar, not yet peaked)"
+            segment_signal = "🟢 Ignition"
         else:
-            segment_signal = "🟡 Mixed (no clear rising or peak pattern)"
+            segment_signal = "🟡 Mixed"
 
-        # --- WARRIOR-SPECIFIC METRICS ---------------------------------------
-        # 1) 50-day average volume
+        # --- WARRIOR METRICS -----------------------------------------------
         vol_series = pd.to_numeric(daily["Volume"], errors="coerce").dropna()
         if len(vol_series) >= 50:
             volume_avg_50d = float(np.mean(vol_series[-50:]))
         else:
             volume_avg_50d = float(np.mean(vol_series)) if len(vol_series) > 0 else np.nan
 
-        # 2) Intraday accumulated volume (cumulative so far today — see
-        # conversation: NOT time-of-day-adjusted, so this ratio naturally
-        # grows across the session and isn't directly comparable at 9:45
-        # AM vs 3 PM. Confirmed acceptable for this model's use case,
-        # since the strategy expects waves at unpredictable times
-        # throughout the day, not only in the early minutes.)
         volume_day = float(np.sum(pd.to_numeric(intra["Volume"], errors="coerce").fillna(0)))
-
-        # 3) Ratio: intraday volume vs 50-day average
         volume_day_vs_50d = volume_day / volume_avg_50d if volume_avg_50d and volume_avg_50d > 0 else np.nan
 
-        # 4) Intraday open vs previous SETTLED daily close.
-        # FIX: uses _prior_close_row() instead of blind `.iloc[-1]` — see
-        # that function's docstring. Without this, if Yahoo's daily bar
-        # for "today" updates live during market hours, this could have
-        # silently compared today's open against today's still-forming
-        # price instead of against yesterday's actual close.
         try:
             prior_row, _ = _prior_close_row(daily)
             prev_close = float(prior_row["Close"])
@@ -644,16 +621,34 @@ def price_acceleration_engine(
         except Exception:
             price_open_prevclose = np.nan
 
+        # --- WARRIOR FILTERS ------------------------------------------------
+        if min_gap_pct is not None and price_open_prevclose < min_gap_pct:
+            r["Reason"] = f"Gap too weak ({price_open_prevclose:.2f}%, need {min_gap_pct}%)"
+            rejects.append(r)
+            continue
+
+        if min_volume_ratio is not None and volume_day_vs_50d < min_volume_ratio:
+            r["Reason"] = f"Volume ratio too weak ({volume_day_vs_50d:.2f}, need {min_volume_ratio})"
+            rejects.append(r)
+            continue
+
+        if min_volume_day is not None and volume_day < min_volume_day:
+            r["Reason"] = f"Intraday volume too low ({volume_day:.0f}, need {min_volume_day})"
+            rejects.append(r)
+            continue
+
+        # --- FINAL ROW ------------------------------------------------------
         rows.append({
             "Ticker": ticker,
             "Close": round(price, 2),
-            "Price_Open_PrevClose_%": round(price_open_prevclose, 3) if pd.notna(price_open_prevclose) else np.nan,
-            "Volume_Day_vs_50d": round(volume_day_vs_50d, 3) if pd.notna(volume_day_vs_50d) else np.nan,
+            "Open": round(float(intra["Open"].iloc[0]), 2),
+            "Price_Open_PrevClose_%": round(price_open_prevclose, 3),
+            "Volume_Day_vs_50d": round(volume_day_vs_50d, 3),
             "Price_Increase_%_5Bars": round(pct, 3),
             "Avg_Volume_Last5Bars": round(float(np.mean(bar_vol_values)), 1),
             "Avg_Volume_20d": r["Avg_Volume_20d"],
             "Volume_Day": round(volume_day, 1),
-            "Volume_Avg_50d": round(volume_avg_50d, 1) if pd.notna(volume_avg_50d) else np.nan,
+            "Volume_Avg_50d": round(volume_avg_50d, 1),
             "Segment_Signal": segment_signal,
             "Regression_Slope_Pct": round(reg_slope_pct, 5),
             "Consistency": round(consistency_score, 2),
@@ -684,7 +679,6 @@ def price_acceleration_engine(
         ).reset_index(drop=True)
 
     rejects_df = pd.DataFrame(rejects)
-
     return ranking, rejects_df
 
 # ==============================================================================
@@ -718,14 +712,37 @@ st.write("### 🔍 Price Boundaries Filter")
 min_price = st.number_input("Minimum Price ($)", min_value=0.0, value=2.00, step=0.25)
 max_price = st.number_input("Maximum Price ($)", min_value=0.0, value=20.00, step=0.25)
 
-min_reg_slope_pct = st.number_input(
-    "Minimum Regression Slope (% per bar)",
-    min_value=0.0,
-    value=0.002,
-    step=0.001,
-    format="%.3f",
-    help="Percentage slope per bar. Example: 0.005 = 0.5% per bar (≈2.5% over 5 bars)."
+st.write("### 🔍 Warrior Filters")
+
+min_gap_pct = st.number_input(
+    "Minimum Price_Open_PrevClose_% (Gap %)",
+    min_value=-50.0,
+    value=2.0,
+    step=0.5
 )
+
+min_volume_ratio = st.number_input(
+    "Minimum Volume_Day_vs_50d (Relative Volume)",
+    min_value=0.0,
+    value=0.0,
+    step=0.25
+)
+
+min_volume_day = st.number_input(
+    "Minimum Volume_Day (Raw Intraday Volume)",
+    min_value=0.0,
+    value=0.0,
+    step=5000.0
+)
+
+##min_reg_slope_pct = st.number_input(
+#    "Minimum Regression Slope (% per bar)",
+#    min_value=0.0,
+#    value=0.002,
+#    step=0.001,
+#    format="%.3f",
+#    help="Percentage slope per bar. Example: 0.005 = 0.5% per bar (≈2.5% over 5 bars)."
+##)
 
 max_stale_bars_last5 = st.slider(
     "Max no-trade bars allowed in last 5",
@@ -772,14 +789,26 @@ if run_clicked:
     intra_batch = fetch_intraday_batch(tuple(candidates))
     t3 = time.time()
 
-    ranking, engine_rejects = price_acceleration_engine(
-        candidates, daily_batch, intra_batch, min_price, max_price,
-        max_stale_bars_last5=max_stale_bars_last5,
-        min_reg_slope_pct=min_reg_slope_pct,
+    #ranking, engine_rejects = price_acceleration_engine(
+    #    candidates, daily_batch, intra_batch, min_price, max_price,
+    #    max_stale_bars_last5=max_stale_bars_last5,
+    #    )
+
+    ranking, rejects_df = price_acceleration_engine(
+        candidates,
+        daily_batch,
+        intra_batch,
+        min_price,
+        max_price,
+        max_stale_bars_last5,
+        min_gap_pct=min_gap_pct,
+        min_volume_ratio=min_volume_ratio,
+        min_volume_day=min_volume_day,
     )
+
     t4 = time.time()
 
-    rejects = pd.concat([pd.DataFrame(prefilter_rejects), engine_rejects], ignore_index=True)
+    rejects = pd.concat([pd.DataFrame(prefilter_rejects), rejects_df], ignore_index=True)
 
     st.session_state["model_results"] = {
         "ranking": ranking,
